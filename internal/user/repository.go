@@ -5,11 +5,11 @@ import "regexp"
 type ErrorCode string
 
 const (
-	CodeDuplicateUser  ErrorCode = "duplicate_user"
-	CodeInvalidUser    ErrorCode = "invalid_user"
-	CodeInvalidEmail   ErrorCode = "invalid_email"
-	CodeUserNotFound   ErrorCode = "user_not_found"
-	CodeStorage        ErrorCode = "storage_error"
+	CodeDuplicateUser ErrorCode = "duplicate_user"
+	CodeInvalidUser   ErrorCode = "invalid_user"
+	CodeInvalidEmail  ErrorCode = "invalid_email"
+	CodeUserNotFound  ErrorCode = "user_not_found"
+	CodeStorage       ErrorCode = "storage_error"
 )
 
 // EmailRegex pattern for basic email validation
