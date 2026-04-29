@@ -132,4 +132,29 @@ func (r *UserRepo) saveLocked() error {
 	return nil
 }
 
+// Remove removes a user by ID from persistent JSON storage
+func (r *UserRepo) Remove(userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u, found := r.users[userID]
+	if !found {
+		return user.ErrUserNotFound
+	}
+
+	emailKey := strings.ToLower(strings.TrimSpace(u.Email))
+	delete(r.users, userID)
+	delete(r.emails, emailKey)
+
+	if err := r.saveLocked(); err != nil {
+		// Restore the user on save failure
+		r.users[userID] = u
+		r.emails[emailKey] = userID
+		return err
+	}
+
+	r.logger.Info("user persisted after removal", "user_id", userID)
+	return nil
+}
+
 var _ user.Repository = (*UserRepo)(nil)

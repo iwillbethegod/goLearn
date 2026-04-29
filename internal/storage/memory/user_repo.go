@@ -56,4 +56,21 @@ func (r *UserRepo) List() ([]user.User, error) {
 	return users, nil
 }
 
+// Remove removes a user by ID from the in-memory store
+func (r *UserRepo) Remove(userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	u, found := r.users[userID]
+	if !found {
+		return user.ErrUserNotFound
+	}
+
+	emailKey := strings.ToLower(strings.TrimSpace(u.Email))
+	delete(r.users, userID)
+	delete(r.emails, emailKey)
+	r.logger.Debug("user removed from memory", "user_id", userID)
+	return nil
+}
+
 var _ user.Repository = (*UserRepo)(nil)

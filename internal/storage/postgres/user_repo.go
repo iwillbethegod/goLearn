@@ -25,4 +25,8 @@ func (r *UserRepo) List() ([]user.User, error) {
 	return nil, ErrPostgresNotImplemented
 }
 
+func (r *UserRepo) Remove(userID string) error {
+	return ErrPostgresNotImplemented
+}
+
 var _ user.Repository = (*UserRepo)(nil)
