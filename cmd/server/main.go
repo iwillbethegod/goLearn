@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ashishsinghbhadoria/goLearn/internal/storage/jsonfile"
+	"github.com/ashishsinghbhadoria/goLearn/internal/app"
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 	"github.com/ashishsinghbhadoria/goLearn/pkg/logger"
 	"github.com/ashishsinghbhadoria/goLearn/pkg/metrics"
@@ -17,11 +17,19 @@ func main() {
 	addEmail := flag.String("email", "", "Email of the user to add")
 	list := flag.Bool("list", false, "List all users")
 	dataPath := flag.String("data", ".data/users.json", "Path to the user data file")
+	storageType := flag.String("storage", "jsonfile", "Storage strategy (memory, jsonfile)")
 	flag.Parse()
 
 	log := logger.NewLogger()
 	metricsCollector := metrics.New()
-	repository, err := jsonfile.NewUserRepo(*dataPath, log)
+
+	// Use factory pattern to create the appropriate repository
+	cfg := app.RepositoryConfig{
+		Type:     app.RepositoryType(*storageType),
+		JSONPath: *dataPath,
+		Logger:   log,
+	}
+	repository, err := app.NewRepository(cfg)
 	if err != nil {
 		log.Error("failed to initialize user repository", "error", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -84,4 +92,8 @@ func printUsage() {
 	fmt.Println("  go run ./cmd/server --list")
 	fmt.Println("  go run ./cmd/server --name=\"Alice\" --email=\"alice@example.com\"")
 	fmt.Println("  go run ./cmd/server --data=\".data/users.json\" --list")
+	fmt.Println()
+	fmt.Println("Options:")
+	fmt.Println("  --storage=<type>    Storage strategy: memory or jsonfile (default: jsonfile)")
+	fmt.Println("  --data=<path>       Path to user data file (default: .data/users.json)")
 }
