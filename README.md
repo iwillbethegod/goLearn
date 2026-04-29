@@ -25,7 +25,7 @@ This repository is structured with a clear separation of concerns:
 
 ## Run
 
-Add a user:
+Add a user (uses JSONFile by default):
 
 ```bash
 go run ./cmd/server --name="Alice" --email="alice@example.com"
@@ -43,13 +43,42 @@ Use a custom data file:
 go run ./cmd/server --data=".data/users.json" --list
 ```
 
+### Storage Strategies
+
+The CLI supports different repository implementations via the `--storage` flag:
+
+**In-Memory (ephemeral)** — useful for testing or demos:
+```bash
+go run ./cmd/server --storage=memory --name="Bob" --email="bob@example.com"
+go run ./cmd/server --storage=memory --list  # Empty (no persistence)
+```
+
+**JSON File (persistent)** — default, data survives between CLI runs:
+```bash
+go run ./cmd/server --storage=jsonfile --name="Alice" --email="alice@example.com"
+go run ./cmd/server --storage=jsonfile --list  # Data persists
+```
+
 ## Architecture
 
-The project follows Clean Architecture principles:
+The project follows Clean Architecture principles with the **Strategy Pattern** for repository selection:
 
 - Handlers and CLI code are entry points
-- `internal/user` contains business logic and abstractions
-- Repositories are implemented separately from the service layer
-- The CLI uses `internal/storage/jsonfile` so users remain available between separate command runs
-- Shared infrastructure such as logging and metrics are provided via `pkg`
-- `internal/transport/grpc` and `internal/storage/postgres` are prepared for future extensions
+- `internal/user` contains business logic and the `Repository` interface (abstraction)
+- `internal/storage/` holds all repository implementations (strategies):
+  - `memory/` — ephemeral in-memory storage
+  - `jsonfile/` — persistent JSON file storage
+  - `postgres/` — stubbed for future implementation
+- `internal/app/factory.go` implements the factory pattern to instantiate repositories
+  - Decouples concrete implementations from the CLI code
+  - Easy to swap strategies at runtime based on configuration
+- Shared infrastructure (logging, metrics) is provided via `pkg/`
+- `internal/transport/grpc` is prepared for future transport expansion
+
+### Strategy Pattern Benefits
+
+1. **Easy testing** — use in-memory repository in tests
+2. **Runtime flexibility** — select storage via CLI flag
+3. **Maintainability** — add new repositories without changing CLI code
+4. **Dependency inversion** — CLI depends on the factory, not concrete types
+
