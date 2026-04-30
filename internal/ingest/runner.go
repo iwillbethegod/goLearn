@@ -2,12 +2,13 @@ package ingest
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/handler"
 	"github.com/ashishsinghbhadoria/goLearn/internal/pool"
 	"github.com/ashishsinghbhadoria/goLearn/internal/processor"
 )
@@ -21,21 +22,28 @@ type FileStats struct {
 }
 
 // Runner drives multiple files through one Processor and one Pool in
-// parallel. It tracks per-file cancellation funcs by basename so the
-// REPL can target individual files.
+// parallel. It applies the same handler chain to every record and
+// tracks per-file cancellation funcs by basename so the REPL can
+// target individual files.
 type Runner struct {
-	proc processor.Processor
-	pool *pool.Pool
+	proc   processor.Processor
+	pool   *pool.Pool
+	chain  handler.Handler
+	stats  *handler.Stats
+	logger *slog.Logger
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 	files   []FileStats
 }
 
-func NewRunner(proc processor.Processor, p *pool.Pool) *Runner {
+func NewRunner(proc processor.Processor, p *pool.Pool, chain handler.Handler, stats *handler.Stats, logger *slog.Logger) *Runner {
 	return &Runner{
 		proc:    proc,
 		pool:    p,
+		chain:   chain,
+		stats:   stats,
+		logger:  logger,
 		cancels: make(map[string]context.CancelFunc),
 	}
 }
@@ -104,7 +112,7 @@ func (r *Runner) runFile(rootCtx context.Context, path string) {
 	start := time.Now()
 	stream, err := r.proc.Stream(fctx, path)
 	if err != nil {
-		log.Printf("file=%s open_error err=%v", name, err)
+		r.logger.Error("file open failed", "file", name, "err", err)
 		return
 	}
 
@@ -112,17 +120,21 @@ func (r *Runner) runFile(rootCtx context.Context, path string) {
 	streamed := 0
 	for rec := range stream {
 		if rec.Err != nil {
-			r.pool.Stats.ParseErr.Add(1)
-			log.Printf("file=%s parse_err err=%v", name, rec.Err)
+			r.stats.IncParseErr()
+			r.logger.Warn("parse error", "file", name, "err", rec.Err)
 			continue
 		}
 		jobs.Add(1)
-		_ = r.pool.Submit(pool.Job{
-			File: name,
-			User: rec.User,
-			Ctx:  fctx,
-			Done: jobs.Done,
+		u := rec.User
+		err := r.pool.Submit(fctx, func(ctx context.Context) {
+			defer jobs.Done()
+			r.chain(ctx, name, u)
 		})
+		if err != nil {
+			// Submit didn't enqueue — the closure never runs, so
+			// release the WaitGroup ourselves.
+			jobs.Done()
+		}
 		streamed++
 	}
 	jobs.Wait()
@@ -132,5 +144,5 @@ func (r *Runner) runFile(rootCtx context.Context, path string) {
 	r.files = append(r.files, FileStats{Path: path, Records: streamed, Duration: dur})
 	r.mu.Unlock()
 
-	log.Printf("file=%s records=%d duration=%s", name, streamed, dur)
+	r.logger.Info("file done", "file", name, "records", streamed, "duration", dur)
 }
