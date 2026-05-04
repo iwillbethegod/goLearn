@@ -127,10 +127,10 @@ components:
       name: id
       in: path
       required: true
-      description: User identifier (`u-` prefix + nanosecond timestamp).
+      description: User identifier (`u-` prefix + 24 lowercase hex chars).
       schema:
         type: string
-        pattern: '^u-\d+$'
+        pattern: '^u-[0-9a-f]+$'
 
   schemas:
     User:
@@ -139,7 +139,7 @@ components:
       properties:
         id:
           type: string
-          example: u-1777885347375949000
+          example: u-7c0a5b6d3f1e9a4b2d8c4f1e
         name:
           type: string
           minLength: 1

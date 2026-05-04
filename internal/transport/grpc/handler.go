@@ -44,7 +44,7 @@ func (h *UserHandler) AddUser(ctx context.Context, request *AddUserRequest) (*Ad
 }
 
 func (h *UserHandler) ListUsers(ctx context.Context, _ *Empty) (*ListUsersResponse, error) {
-	users, err := h.service.ListUsers()
+	users, err := h.service.ListUsers(ctx)
 	if err != nil {
 		h.logger.Error("grpc list users failed", "error", err)
 		return nil, err

@@ -25,7 +25,7 @@ func NewHandler(svc *user.Service, logger *slog.Logger) *Handler {
 }
 
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.svc.ListUsers()
+	users, err := h.svc.ListUsers(r.Context())
 	if err != nil {
 		writeError(w, r, h.logger, err)
 		return

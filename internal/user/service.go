@@ -2,11 +2,11 @@ package user
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -18,9 +18,29 @@ import (
 const MinPasswordLen = 8
 
 const (
-	loginFailedMsg       = "login failed"
-	invalidEmailFmtMsg   = "invalid email format"
+	loginFailedMsg     = "login failed"
+	invalidEmailFmtMsg = "invalid email format"
 )
+
+// dummyHash is generated once at init time and used as a constant-time
+// stand-in when Login fails to find the user. Without this, a bcrypt
+// compare runs only on real users (~60 ms), so an attacker can
+// distinguish "user exists" from "user doesn't" by request latency.
+// Comparing against dummyHash keeps the wall time statistically
+// uniform across both branches.
+var dummyHash []byte
+
+func init() {
+	h, err := bcrypt.GenerateFromPassword([]byte("constant-time-dummy"), bcrypt.DefaultCost)
+	if err != nil {
+		// bcrypt.GenerateFromPassword on a fixed input cannot fail in
+		// practice; panicking here would be surprising at startup.
+		// Set to a known-bad value so subsequent compares simply fail.
+		dummyHash = []byte("invalid")
+		return
+	}
+	dummyHash = h
+}
 
 type Service struct {
 	repo    Repository
@@ -59,7 +79,7 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (User, error)
 		Email: trimmedEmail,
 	}
 
-	if err := s.repo.Add(newUser); err != nil {
+	if err := s.repo.Add(ctx, newUser); err != nil {
 		s.logger.Error("repository failed to add user", "error", err, "user_id", newUser.ID)
 		return User{}, err
 	}
@@ -69,8 +89,8 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (User, error)
 	return newUser, nil
 }
 
-func (s *Service) ListUsers() ([]User, error) {
-	users, err := s.repo.List()
+func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
+	users, err := s.repo.List(ctx)
 	if err != nil {
 		s.logger.Error("repository failed to list users", "error", err)
 		return nil, err
@@ -85,7 +105,7 @@ func (s *Service) RemoveUser(ctx context.Context, userID string) error {
 		return ErrInvalidUser
 	}
 
-	if err := s.repo.Remove(userID); err != nil {
+	if err := s.repo.Remove(ctx, userID); err != nil {
 		s.logger.Error("repository failed to remove user", "error", err, "user_id", userID)
 		return err
 	}
@@ -94,8 +114,19 @@ func (s *Service) RemoveUser(ctx context.Context, userID string) error {
 	return nil
 }
 
+// generateID returns a "u-" prefix followed by 24 hex chars (12
+// random bytes / 96 bits). The previous time.Now().UnixNano() scheme
+// could collide when two registrations landed in the same nanosecond.
 func (s *Service) generateID() string {
-	return fmt.Sprintf("u-%d", time.Now().UnixNano())
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// /dev/urandom is effectively never broken on production
+		// systems; if it is, fall back to a still-unique enough ID
+		// rather than panicking.
+		s.logger.Error("rand.Read failed, falling back", "err", err)
+		return "u-fallback-" + hex.EncodeToString(b[:])
+	}
+	return "u-" + hex.EncodeToString(b[:])
 }
 
 // GetUser returns the user with the given ID.
@@ -104,7 +135,7 @@ func (s *Service) GetUser(ctx context.Context, id string) (User, error) {
 	if id == "" {
 		return User{}, ErrInvalidUser
 	}
-	u, err := s.repo.Get(id)
+	u, err := s.repo.Get(ctx, id)
 	if err != nil {
 		s.logger.Debug("repository get failed", "error", err, "user_id", id)
 		return User{}, err
@@ -121,7 +152,7 @@ func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (User,
 	if id == "" {
 		return User{}, ErrInvalidUser
 	}
-	current, err := s.repo.Get(id)
+	current, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return User{}, err
 	}
@@ -137,7 +168,7 @@ func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (User,
 		}
 		current.Email = trimmedEmail
 	}
-	if err := s.repo.Update(current); err != nil {
+	if err := s.repo.Update(ctx, current); err != nil {
 		s.logger.Error("repository failed to update user", "error", err, "user_id", id)
 		return User{}, err
 	}
@@ -176,7 +207,7 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (U
 		PasswordHash: string(hash),
 	}
 
-	if err := s.repo.Add(newUser); err != nil {
+	if err := s.repo.Add(ctx, newUser); err != nil {
 		s.logger.Error("repository failed to add user", "error", err, "user_id", newUser.ID)
 		return User{}, err
 	}
@@ -189,10 +220,17 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (U
 // Login looks up the user by email and verifies the password against
 // the stored bcrypt hash. Wrong email and wrong password both return
 // ErrInvalidCredential to avoid leaking which one was wrong.
+//
+// The not-found branch deliberately runs a bcrypt compare against a
+// dummy hash so the response time is statistically uniform with the
+// real-user / wrong-password branch — closes a timing side-channel.
 func (s *Service) Login(ctx context.Context, email, password string) (User, error) {
-	u, err := s.repo.GetByEmail(email)
+	u, err := s.repo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrInvalidEmail) {
+			// Constant-time compensation: keep wall time comparable to
+			// the real-user path so an attacker can't distinguish.
+			_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 			s.logger.Warn(loginFailedMsg, "reason", "no such user", "email", email)
 			return User{}, ErrInvalidCredential
 		}
@@ -200,6 +238,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (User, erro
 		return User{}, err
 	}
 	if u.PasswordHash == "" {
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 		s.logger.Warn(loginFailedMsg, "reason", "user has no password set", "email", email)
 		return User{}, ErrInvalidCredential
 	}
@@ -218,7 +257,7 @@ func (s *Service) DeleteByEmail(ctx context.Context, email, password string) err
 	if err != nil {
 		return err
 	}
-	if err := s.repo.Remove(u.ID); err != nil {
+	if err := s.repo.Remove(ctx, u.ID); err != nil {
 		s.logger.Error("repository failed to remove user", "error", err, "user_id", u.ID)
 		return err
 	}

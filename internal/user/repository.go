@@ -1,6 +1,9 @@
 package user
 
-import "regexp"
+import (
+	"context"
+	"regexp"
+)
 
 type ErrorCode string
 
@@ -64,10 +67,10 @@ var (
 )
 
 type Repository interface {
-	Add(User) error
-	Get(id string) (User, error)
-	GetByEmail(email string) (User, error)
-	Update(User) error
-	Remove(userID string) error
-	List() ([]User, error)
+	Add(ctx context.Context, u User) error
+	Get(ctx context.Context, id string) (User, error)
+	GetByEmail(ctx context.Context, email string) (User, error)
+	Update(ctx context.Context, u User) error
+	Remove(ctx context.Context, userID string) error
+	List(ctx context.Context) ([]User, error)
 }

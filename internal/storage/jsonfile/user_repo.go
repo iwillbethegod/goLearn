@@ -1,6 +1,7 @@
 package jsonfile
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -12,6 +13,16 @@ import (
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
+
+// checkCtx is the cooperative cancellation point used at the top of
+// every repository call. The jsonfile backend is sync I/O, so ctx is
+// only inspected pre-flight; once a write begins it runs to completion.
+func checkCtx(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
 
 type UserRepo struct {
 	mu     sync.RWMutex
@@ -34,7 +45,10 @@ func NewUserRepo(path string, logger *slog.Logger) (*UserRepo, error) {
 	return repo, nil
 }
 
-func (r *UserRepo) Add(u user.User) error {
+func (r *UserRepo) Add(ctx context.Context, u user.User) error {
+	if err := checkCtx(ctx); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -58,7 +72,10 @@ func (r *UserRepo) Add(u user.User) error {
 	return nil
 }
 
-func (r *UserRepo) Get(id string) (user.User, error) {
+func (r *UserRepo) Get(ctx context.Context, id string) (user.User, error) {
+	if err := checkCtx(ctx); err != nil {
+		return user.User{}, err
+	}
 	if strings.TrimSpace(id) == "" {
 		return user.User{}, user.ErrInvalidUser
 	}
@@ -71,7 +88,10 @@ func (r *UserRepo) Get(id string) (user.User, error) {
 	return u, nil
 }
 
-func (r *UserRepo) GetByEmail(email string) (user.User, error) {
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (user.User, error) {
+	if err := checkCtx(ctx); err != nil {
+		return user.User{}, err
+	}
 	emailKey := strings.ToLower(strings.TrimSpace(email))
 	if emailKey == "" {
 		return user.User{}, user.ErrInvalidEmail
@@ -88,7 +108,10 @@ func (r *UserRepo) GetByEmail(email string) (user.User, error) {
 // Update overwrites the user record at u.ID. Email re-indexing is
 // transactional: an email change that collides with another user
 // returns ErrDuplicateUser without mutating state.
-func (r *UserRepo) Update(u user.User) error {
+func (r *UserRepo) Update(ctx context.Context, u user.User) error {
+	if err := checkCtx(ctx); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -131,7 +154,10 @@ func (r *UserRepo) Update(u user.User) error {
 	return nil
 }
 
-func (r *UserRepo) List() ([]user.User, error) {
+func (r *UserRepo) List(ctx context.Context) ([]user.User, error) {
+	if err := checkCtx(ctx); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -206,7 +232,10 @@ func (r *UserRepo) saveLocked() error {
 }
 
 // Remove removes a user by ID from persistent JSON storage
-func (r *UserRepo) Remove(userID string) error {
+func (r *UserRepo) Remove(ctx context.Context, userID string) error {
+	if err := checkCtx(ctx); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

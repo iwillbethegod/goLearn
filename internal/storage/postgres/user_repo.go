@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 
@@ -17,27 +18,27 @@ func NewUserRepo(db *sql.DB) *UserRepo {
 	return &UserRepo{db: db}
 }
 
-func (r *UserRepo) Add(u user.User) error {
+func (r *UserRepo) Add(ctx context.Context, u user.User) error {
 	return ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) Get(id string) (user.User, error) {
+func (r *UserRepo) Get(ctx context.Context, id string) (user.User, error) {
 	return user.User{}, ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) GetByEmail(email string) (user.User, error) {
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (user.User, error) {
 	return user.User{}, ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) Update(u user.User) error {
+func (r *UserRepo) Update(ctx context.Context, u user.User) error {
 	return ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) List() ([]user.User, error) {
+func (r *UserRepo) List(ctx context.Context) ([]user.User, error) {
 	return nil, ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) Remove(userID string) error {
+func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	return ErrPostgresNotImplemented
 }
 

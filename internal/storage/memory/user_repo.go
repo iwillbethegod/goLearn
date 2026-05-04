@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"sync"
@@ -26,7 +27,10 @@ func NewUserRepo(logger *slog.Logger) *UserRepo {
 }
 
 // Add adds a user to the in-memory store
-func (r *UserRepo) Add(u user.User) error {
+func (r *UserRepo) Add(ctx context.Context, u user.User) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -45,7 +49,10 @@ func (r *UserRepo) Add(u user.User) error {
 }
 
 // Get returns the user with the given ID, or ErrUserNotFound.
-func (r *UserRepo) Get(id string) (user.User, error) {
+func (r *UserRepo) Get(ctx context.Context, id string) (user.User, error) {
+	if err := ctx.Err(); err != nil {
+		return user.User{}, err
+	}
 	if strings.TrimSpace(id) == "" {
 		return user.User{}, user.ErrInvalidUser
 	}
@@ -60,7 +67,10 @@ func (r *UserRepo) Get(id string) (user.User, error) {
 
 // Update overwrites the user record at u.ID. Detects email collision
 // against another user before mutating.
-func (r *UserRepo) Update(u user.User) error {
+func (r *UserRepo) Update(ctx context.Context, u user.User) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -90,7 +100,10 @@ func (r *UserRepo) Update(u user.User) error {
 
 // GetByEmail returns the user with the given email (case-insensitive,
 // whitespace-insensitive lookup).
-func (r *UserRepo) GetByEmail(email string) (user.User, error) {
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (user.User, error) {
+	if err := ctx.Err(); err != nil {
+		return user.User{}, err
+	}
 	emailKey := strings.ToLower(strings.TrimSpace(email))
 	if emailKey == "" {
 		return user.User{}, user.ErrInvalidEmail
@@ -105,7 +118,10 @@ func (r *UserRepo) GetByEmail(email string) (user.User, error) {
 }
 
 // List returns all users from the in-memory store
-func (r *UserRepo) List() ([]user.User, error) {
+func (r *UserRepo) List(ctx context.Context) ([]user.User, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -117,7 +133,10 @@ func (r *UserRepo) List() ([]user.User, error) {
 }
 
 // Remove removes a user by ID from the in-memory store
-func (r *UserRepo) Remove(userID string) error {
+func (r *UserRepo) Remove(ctx context.Context, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

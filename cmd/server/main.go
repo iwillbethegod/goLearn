@@ -92,7 +92,7 @@ func addUserInteractive(service *user.Service) error {
 
 func removeUserInteractive(service *user.Service) error {
 	// First list all users
-	users, err := service.ListUsers()
+	users, err := service.ListUsers(context.Background())
 	if err != nil {
 		service.Logger().Error("failed to list users", "error", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -135,7 +135,7 @@ func removeUserInteractive(service *user.Service) error {
 }
 
 func listUsers(service *user.Service) error {
-	users, err := service.ListUsers()
+	users, err := service.ListUsers(context.Background())
 	if err != nil {
 		service.Logger().Error("failed to list users", "error", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
