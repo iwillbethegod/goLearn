@@ -15,17 +15,47 @@ paths:
   /users:
     get:
       operationId: listUsers
-      summary: List all users
+      summary: List users (paginated)
+      description: |
+        Returns a window of users sorted by ID (ascending). Use `limit`
+        and `offset` to page through the full set; `X-Total-Count` on
+        the response carries the unpaginated count.
       tags: [users]
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of users to return (default 100, max 1000).
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: offset
+          in: query
+          description: Number of users to skip from the start.
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         '200':
-          description: List of users (possibly empty).
+          description: A page of users (possibly empty).
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/User'
+          headers:
+            X-Total-Count:
+              description: Total number of users (unpaginated).
+              schema:
+                type: integer
+                minimum: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/Internal'
     post:

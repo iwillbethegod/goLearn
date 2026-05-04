@@ -5,11 +5,14 @@
             "description": "",
             "item": [
                 {
-                    "id": "d8a500d9-cac6-4568-88d9-46cac08d69ef",
-                    "name": "List all users",
+                    "id": "f2c2a65a-3ba3-44fd-81de-b22e97786cda",
+                    "name": "List users (paginated)",
                     "request": {
-                        "name": "List all users",
-                        "description": {},
+                        "name": "List users (paginated)",
+                        "description": {
+                            "content": "Returns a window of users sorted by ID (ascending). Use `limit`\nand `offset` to page through the full set; `X-Total-Count` on\nthe response carries the unpaginated count.\n",
+                            "type": "text/plain"
+                        },
                         "url": {
                             "path": [
                                 "users"
@@ -17,7 +20,26 @@
                             "host": [
                                 "{{baseUrl}}"
                             ],
-                            "query": [],
+                            "query": [
+                                {
+                                    "disabled": false,
+                                    "description": {
+                                        "content": "Maximum number of users to return (default 100, max 1000).",
+                                        "type": "text/plain"
+                                    },
+                                    "key": "limit",
+                                    "value": "100"
+                                },
+                                {
+                                    "disabled": false,
+                                    "description": {
+                                        "content": "Number of users to skip from the start.",
+                                        "type": "text/plain"
+                                    },
+                                    "key": "offset",
+                                    "value": "0"
+                                }
+                            ],
                             "variable": []
                         },
                         "header": [
@@ -32,8 +54,8 @@
                     },
                     "response": [
                         {
-                            "id": "d9c5dd8c-354f-4add-a553-26ec9113e3cb",
-                            "name": "List of users (possibly empty).",
+                            "id": "36be0f50-d151-48bb-b5de-66817b72aeb7",
+                            "name": "A page of users (possibly empty).",
                             "originalRequest": {
                                 "url": {
                                     "path": [
@@ -42,7 +64,26 @@
                                     "host": [
                                         "{{baseUrl}}"
                                     ],
-                                    "query": [],
+                                    "query": [
+                                        {
+                                            "disabled": false,
+                                            "description": {
+                                                "content": "Maximum number of users to return (default 100, max 1000).",
+                                                "type": "text/plain"
+                                            },
+                                            "key": "limit",
+                                            "value": "100"
+                                        },
+                                        {
+                                            "disabled": false,
+                                            "description": {
+                                                "content": "Number of users to skip from the start.",
+                                                "type": "text/plain"
+                                            },
+                                            "key": "offset",
+                                            "value": "0"
+                                        }
+                                    ],
                                     "variable": []
                                 },
                                 "header": [
@@ -60,6 +101,15 @@
                                 {
                                     "key": "Content-Type",
                                     "value": "application/json"
+                                },
+                                {
+                                    "disabled": false,
+                                    "description": {
+                                        "content": "Total number of users (unpaginated).",
+                                        "type": "text/plain"
+                                    },
+                                    "key": "X-Total-Count",
+                                    "value": "<integer>"
                                 }
                             ],
                             "body": "[\n  {\n    \"id\": \"<string>\",\n    \"name\": \"<string>\",\n    \"email\": \"<email>\"\n  },\n  {\n    \"id\": \"<string>\",\n    \"name\": \"<string>\",\n    \"email\": \"<email>\"\n  }\n]",
@@ -67,7 +117,61 @@
                             "_postman_previewlanguage": "json"
                         },
                         {
-                            "id": "2b5b4265-231d-40a5-9f01-eb8f0a8510ad",
+                            "id": "367d7062-5d3a-403a-b228-c61682e50bb0",
+                            "name": "Request failed validation.",
+                            "originalRequest": {
+                                "url": {
+                                    "path": [
+                                        "users"
+                                    ],
+                                    "host": [
+                                        "{{baseUrl}}"
+                                    ],
+                                    "query": [
+                                        {
+                                            "disabled": false,
+                                            "description": {
+                                                "content": "Maximum number of users to return (default 100, max 1000).",
+                                                "type": "text/plain"
+                                            },
+                                            "key": "limit",
+                                            "value": "100"
+                                        },
+                                        {
+                                            "disabled": false,
+                                            "description": {
+                                                "content": "Number of users to skip from the start.",
+                                                "type": "text/plain"
+                                            },
+                                            "key": "offset",
+                                            "value": "0"
+                                        }
+                                    ],
+                                    "variable": []
+                                },
+                                "header": [
+                                    {
+                                        "key": "Accept",
+                                        "value": "application/json"
+                                    }
+                                ],
+                                "method": "GET",
+                                "body": {}
+                            },
+                            "status": "Bad Request",
+                            "code": 400,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"code\": \"internal_error\",\n  \"message\": \"<string>\"\n}",
+                            "cookie": [],
+                            "_postman_previewlanguage": "json"
+                        },
+                        {
+                            "id": "c4eae6fe-9149-4f75-b200-65e6f3709f2a",
                             "name": "Internal server error.",
                             "originalRequest": {
                                 "url": {
@@ -77,7 +181,26 @@
                                     "host": [
                                         "{{baseUrl}}"
                                     ],
-                                    "query": [],
+                                    "query": [
+                                        {
+                                            "disabled": false,
+                                            "description": {
+                                                "content": "Maximum number of users to return (default 100, max 1000).",
+                                                "type": "text/plain"
+                                            },
+                                            "key": "limit",
+                                            "value": "100"
+                                        },
+                                        {
+                                            "disabled": false,
+                                            "description": {
+                                                "content": "Number of users to skip from the start.",
+                                                "type": "text/plain"
+                                            },
+                                            "key": "offset",
+                                            "value": "0"
+                                        }
+                                    ],
                                     "variable": []
                                 },
                                 "header": [
@@ -108,7 +231,7 @@
                     }
                 },
                 {
-                    "id": "6cbb3157-4070-4c06-9570-47eb904cfbc8",
+                    "id": "a5d65b4e-0724-44c0-98a4-977d2217211d",
                     "name": "Register a new user",
                     "request": {
                         "name": "Register a new user",
@@ -151,7 +274,7 @@
                     },
                     "response": [
                         {
-                            "id": "232d328e-d0dc-4cc1-9e07-d0c633e20171",
+                            "id": "01d26ba5-4c02-485b-8f57-2d3437ce3b48",
                             "name": "User created.",
                             "originalRequest": {
                                 "url": {
@@ -208,7 +331,7 @@
                             "_postman_previewlanguage": "json"
                         },
                         {
-                            "id": "e4078ea9-0bf9-46cb-85fc-045735782ab9",
+                            "id": "4e189b16-59b7-4011-aa52-c73f71c75ba2",
                             "name": "Request failed validation.",
                             "originalRequest": {
                                 "url": {
@@ -256,7 +379,7 @@
                             "_postman_previewlanguage": "json"
                         },
                         {
-                            "id": "6a665ad0-bad4-4b8e-a2cf-e34297b14b90",
+                            "id": "05afd1c6-b1d4-4d00-a443-73ecc6d44e4e",
                             "name": "Email already in use by another user.",
                             "originalRequest": {
                                 "url": {
@@ -304,7 +427,7 @@
                             "_postman_previewlanguage": "json"
                         },
                         {
-                            "id": "d65dde33-4778-461d-95a8-90d827468c26",
+                            "id": "4e3e84e6-5805-4625-97c1-1351812d012f",
                             "name": "Internal server error.",
                             "originalRequest": {
                                 "url": {
@@ -362,7 +485,7 @@
                     "description": "",
                     "item": [
                         {
-                            "id": "66750927-d49c-431b-97cd-2e45be18c52d",
+                            "id": "0cebaaaf-f5eb-41eb-8ef0-3ba8dcaeadbc",
                             "name": "Get a user by ID",
                             "request": {
                                 "name": "Get a user by ID",
@@ -379,11 +502,11 @@
                                     "variable": [
                                         {
                                             "type": "any",
-                                            "value": "u-49954",
+                                            "value": "u-02",
                                             "key": "id",
                                             "disabled": false,
                                             "description": {
-                                                "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                 "type": "text/plain"
                                             }
                                         }
@@ -401,7 +524,7 @@
                             },
                             "response": [
                                 {
-                                    "id": "7d96f9de-d23c-4ac8-88c3-4a56bcf3357a",
+                                    "id": "7f09dc71-2c90-4eea-b4c8-055aa65c2f0f",
                                     "name": "User found.",
                                     "originalRequest": {
                                         "url": {
@@ -417,11 +540,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -448,7 +571,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "18573b34-9e7b-4745-83d5-9108442fd93b",
+                                    "id": "48427b7e-e0b8-45f1-b7ec-630171f38ed4",
                                     "name": "Request failed validation.",
                                     "originalRequest": {
                                         "url": {
@@ -464,11 +587,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -495,7 +618,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "06a061e6-c74a-47ba-b1e1-3519416b852d",
+                                    "id": "1a38a2e5-ff31-4a6b-ab32-4607ef1c8a28",
                                     "name": "Resource not found.",
                                     "originalRequest": {
                                         "url": {
@@ -511,11 +634,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -542,7 +665,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "466d24ed-0259-45b3-a9d2-003dad96f06a",
+                                    "id": "614ba79c-5b7f-48c4-b96a-3f609928a5f6",
                                     "name": "Internal server error.",
                                     "originalRequest": {
                                         "url": {
@@ -558,11 +681,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -595,7 +718,7 @@
                             }
                         },
                         {
-                            "id": "3ba4104a-ea47-49f0-bb76-e3b912d47a19",
+                            "id": "54ffa322-602b-4af1-be0a-97c037d70870",
                             "name": "Update a user's name and/or email",
                             "request": {
                                 "name": "Update a user's name and/or email",
@@ -615,11 +738,11 @@
                                     "variable": [
                                         {
                                             "type": "any",
-                                            "value": "u-49954",
+                                            "value": "u-02",
                                             "key": "id",
                                             "disabled": false,
                                             "description": {
-                                                "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                 "type": "text/plain"
                                             }
                                         }
@@ -650,7 +773,7 @@
                             },
                             "response": [
                                 {
-                                    "id": "81347526-715f-4d78-b19c-f9fc184a95b8",
+                                    "id": "730a94c6-7001-4cea-8a98-9cf74e793599",
                                     "name": "User updated.",
                                     "originalRequest": {
                                         "url": {
@@ -666,11 +789,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -710,7 +833,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "4164fa3e-4627-45a1-89c8-92a3d7a75714",
+                                    "id": "97332efa-967f-4ffc-a989-877e4d0cbed9",
                                     "name": "Request failed validation.",
                                     "originalRequest": {
                                         "url": {
@@ -726,11 +849,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -770,7 +893,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "352f0ab1-a73e-4e6f-9d79-59e0c37ae6ae",
+                                    "id": "69743431-b416-44c3-bfba-1bd110d1c277",
                                     "name": "Resource not found.",
                                     "originalRequest": {
                                         "url": {
@@ -786,11 +909,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -830,7 +953,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "1c71dc62-ab2e-43d2-94b1-e20f1f2d4350",
+                                    "id": "2f0e2b6d-c6da-42b5-abe0-c98a9d2839c8",
                                     "name": "Email already in use by another user.",
                                     "originalRequest": {
                                         "url": {
@@ -846,11 +969,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -890,7 +1013,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "b37d4b49-e51a-41f6-87a3-7f1b9eaa337b",
+                                    "id": "95deb3bb-c543-4a64-b8de-d2e1e1e7da4f",
                                     "name": "Internal server error.",
                                     "originalRequest": {
                                         "url": {
@@ -906,11 +1029,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -956,7 +1079,7 @@
                             }
                         },
                         {
-                            "id": "7a1a99e0-8482-4a12-93ff-c2a7a2f8d0a9",
+                            "id": "c3a28a83-6ae8-4a49-a826-7e4f8d7f59f1",
                             "name": "Delete a user by ID",
                             "request": {
                                 "name": "Delete a user by ID",
@@ -973,11 +1096,11 @@
                                     "variable": [
                                         {
                                             "type": "any",
-                                            "value": "u-49954",
+                                            "value": "u-02",
                                             "key": "id",
                                             "disabled": false,
                                             "description": {
-                                                "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                 "type": "text/plain"
                                             }
                                         }
@@ -995,7 +1118,7 @@
                             },
                             "response": [
                                 {
-                                    "id": "38c17874-faf3-44db-acae-9861a216aef5",
+                                    "id": "e8368fbf-7f9c-4f13-98ea-b04625d8d525",
                                     "name": "User deleted.",
                                     "originalRequest": {
                                         "url": {
@@ -1011,11 +1134,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -1030,7 +1153,7 @@
                                     "_postman_previewlanguage": "text"
                                 },
                                 {
-                                    "id": "f083c939-bcf7-4245-bff3-8a232504f5c5",
+                                    "id": "d6d61f5b-9aa0-436a-8ca4-d533757dc314",
                                     "name": "Request failed validation.",
                                     "originalRequest": {
                                         "url": {
@@ -1046,11 +1169,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -1077,7 +1200,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "f258e7d7-bc84-45a8-bcd4-863bc86231af",
+                                    "id": "32f62f62-545e-43c5-acea-56fadb2e7d32",
                                     "name": "Resource not found.",
                                     "originalRequest": {
                                         "url": {
@@ -1093,11 +1216,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -1124,7 +1247,7 @@
                                     "_postman_previewlanguage": "json"
                                 },
                                 {
-                                    "id": "8c2585e8-ac49-4ece-b494-9e51ce5d4b15",
+                                    "id": "09c85aba-0471-49c7-9433-31910c3da367",
                                     "name": "Internal server error.",
                                     "originalRequest": {
                                         "url": {
@@ -1140,11 +1263,11 @@
                                                 {
                                                     "disabled": false,
                                                     "description": {
-                                                        "content": "(Required) User identifier (`u-` prefix + nanosecond timestamp).",
+                                                        "content": "(Required) User identifier (`u-` prefix + 24 lowercase hex chars).",
                                                         "type": "text/plain"
                                                     },
                                                     "type": "any",
-                                                    "value": "u-49954",
+                                                    "value": "u-02",
                                                     "key": "id"
                                                 }
                                             ]
@@ -1189,7 +1312,7 @@
         }
     ],
     "info": {
-        "_postman_id": "1c295f4f-3d1e-4942-96ee-b6dd686cb55b",
+        "_postman_id": "f154af19-6ea8-44eb-a565-94df9e18ab06",
         "name": "goLearn User API",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
         "description": {

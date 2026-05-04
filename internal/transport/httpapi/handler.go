@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -24,17 +25,58 @@ func NewHandler(svc *user.Service, logger *slog.Logger) *Handler {
 	return &Handler{svc: svc, logger: logger}
 }
 
-func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
+// Default and ceiling for the limit query param. The same numbers
+// live in the OpenAPI spec; if you change one, change the other.
+const (
+	defaultPageLimit = 100
+	maxPageLimit     = 1000
+)
+
+func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request, params gen.ListUsersParams) {
 	users, err := h.svc.ListUsers(r.Context())
 	if err != nil {
 		writeError(w, r, h.logger, err)
 		return
 	}
-	out := make([]gen.User, 0, len(users))
-	for _, u := range users {
+	total := len(users)
+	limit, offset := paginationParams(params)
+	page := pageSlice(users, limit, offset)
+
+	out := make([]gen.User, 0, len(page))
+	for _, u := range page {
 		out = append(out, toAPIUser(u))
 	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)
+}
+
+func paginationParams(params gen.ListUsersParams) (limit, offset int) {
+	limit = defaultPageLimit
+	if params.Limit != nil {
+		limit = *params.Limit
+	}
+	if limit < 1 {
+		limit = defaultPageLimit
+	}
+	if limit > maxPageLimit {
+		limit = maxPageLimit
+	}
+	offset = 0
+	if params.Offset != nil && *params.Offset >= 0 {
+		offset = *params.Offset
+	}
+	return
+}
+
+func pageSlice(users []user.User, limit, offset int) []user.User {
+	if offset >= len(users) {
+		return nil
+	}
+	end := offset + limit
+	if end > len(users) {
+		end = len(users)
+	}
+	return users[offset:end]
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {

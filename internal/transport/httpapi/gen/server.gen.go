@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -106,6 +107,15 @@ type NotFound = Error
 // basicAuthContextKey is the context key for BasicAuth security scheme
 type basicAuthContextKey string
 
+// ListUsersParams defines parameters for ListUsers.
+type ListUsersParams struct {
+	// Limit Maximum number of users to return (default 100, max 1000).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Number of users to skip from the start.
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
 type CreateUserJSONRequestBody = CreateUserRequest
 
@@ -114,9 +124,9 @@ type UpdateUserJSONRequestBody = UpdateUserRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// List all users
+	// List users (paginated)
 	// (GET /users)
-	ListUsers(w http.ResponseWriter, r *http.Request)
+	ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams)
 	// Register a new user
 	// (POST /users)
 	CreateUser(w http.ResponseWriter, r *http.Request)
@@ -143,8 +153,40 @@ type MiddlewareFunc func(http.Handler) http.Handler
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListUsersParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListUsers(w, r)
+		siw.Handler.ListUsers(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -380,30 +422,34 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"zFdtbxQ5Ev4rJR/Sgeh5CYS7MPflAmTZkbII8aL9QLKhpl09bbbbNrZ7klY0/31Vds9bptmwC0T7re22",
-	"y+Wqp556fC1yU1ujSQcvJtfCosOaArk4eu/JTV/wlySfO2WDMlpM4jwoSTqoQpGD+x+bwUewjgp1BQ/h",
-	"0SFU5pJcjp6gpCvIS3T+wVBkQvF2i6EUmdBYk5gIJUUmHH1ulCMpJsE1lAmfl1Rj8igEcrztt2bwYTx4",
-	"ioPi/OE9kYnQWt7vg1N6LpbLJZvx1mhP0ftnKN/Q54Z84FFudCAdP9HaSuXIlxl98nyj660D7zkqxET8",
-	"a7SJzCj99aMT54xLR+1GpDsIClQVSVhgpWQ8YCiWmXhudFGp/A78OKlRVYCVI5QtKA2NJ5i1gNqEkhwP",
-	"XXRpqjmqWP14l1YngSe3IAfEC6MPr0z4yTRa3kV6vGlcTqBNgILPHApe1W1ku88dYSBG9hZorDOWXFAJ",
-	"UMTB5Y/CuBqDmHQze1BcYfta1Eqfkp6HUkwOepZZ9P7SOHlj6dE+uLdL5EMyn62PX5s5X280s0+UBz4j",
-	"BWXvMrmRtF/Zv2BeKk0Dxg/OKkrZ2qp1LmLSTc1ebFB+kXAvMiGblDy6YKjFio/Lbg5Xrq/G6ytkglde",
-	"aBMuYqJEJnwwDud0EX2JexKiuonznsDW5D3Oey74c1Oj3rrela1Qd5V6W9RjyDa2+4L93sp9FO16cByg",
-	"IvQBjCYoFFUS6sYHmBFYZxZKkmRXfiz0ln2+c4a+DHq6wtpWvAUrldP/u/EwN7XIvsIvJXetNIP/5mN8",
-	"MvuPfFwc0FM8nD2SR/lhcUB/dqvN/mP2gtNxyz23Mxh7zU7x7CeRaYHyxqnQvmV6WDUTr/Ljhk+53icX",
-	"ZjYJhXGAUDShcQQS2yG8MgFIF8blJCEYie3/QFJeoSMJ3pzpvFLMYIBaAsNrThqCMZWH37W5hFASMEA1",
-	"ScAmlOBLtDQ806LjLnZ8xq5tYlaGYBMHKl2YHndP3r6D49fT6G6NGudKz2Nj8EP41aH18ViJ7eAgTkfi",
-	"VjmBN4C6PdOOcuMk5JExJSwUQiiVj0aVh4XyimsrmGgor+Woo37U8kzzWOk5d8vnp1MP9/nu0f6CnMcH",
-	"4JXOibe2fF0XP8FjTWfakvPKc6MAJoUuEkGFiIi5OSV0GqI8OX49FZlgk+naB8PxcMxIMpY0WiUm4vFw",
-	"PHwc6TOUMcmjGAX+mlOsXC6ESA5TKSbiVPnwPq64oTQejcd/qYepQLW/rZnFctzUKTqHbV9vY6/AFCmD",
-	"cN8az+FvgWob2gex0T5J/vWdtr7HaK0IYgU0dY2uXZnHqkr2Odo491xLaXzOXcz08VxqqB4QNF0mIHXA",
-	"uVShBIRZ7lobBiX6kiSsGsDwTL8rCXiWwRTTLDvtMPBKUqwVTYtoLzROk0ww2E3Wpp938pJ8eGZk+93E",
-	"xr5gWO7SDSvZ5R5SDr6bAwkg+4CI8O+KkztJSSg7WJ+adFKPpH9zyiCKBdvVtetE01Bs6/E91b3MxOHX",
-	"4GtLjsctT2/fstbN34jhNzRn1nBbWOwB8jLrCGB0reQyhaiiQPtE8CLOr7G1k9/DLzyXki05FH83Xoe3",
-	"b1kL6m+MV7ofYKraWQvTF72F38uSLyn0R2Z8N8hfyft/fphfUrg9xtsv8g/9B22WjLoX+/I8E7bpIeUT",
-	"FZ+BnezEllWnqVUIUZ+wMF0QqACNzkvU80itrztmhjTlgXsyP6R8Y61xvHXWJgVAWlqjdOgj5I00/kGE",
-	"vK+9v4qQ7wiWTfTu7oB5pwSbQt+B+d8eWGJznx4ZB+sHwU26jUKb23pC9m7MKpNjBZIW/CB0VadrJ6NR",
-	"/FEaHyZH46OxWJ4v/wgAAP//",
+	"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",
+	"fwMAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

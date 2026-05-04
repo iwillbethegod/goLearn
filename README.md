@@ -126,6 +126,174 @@ about `user` (for the User type in the Handler signature) and `pool`
 
 ---
 
+## Architecture walkthrough
+
+### The four binaries
+
+| Binary | Purpose | How to run |
+|---|---|---|
+| **`cmd/api`** | HTTP REST API for User CRUD. Generated from `api/openapi.yaml` via `oapi-codegen`. | `go run ./cmd/api -addr :8080` |
+| **`cmd/ingest`** | Concurrent CSV ingestion with auth-gated access. Day-2 + day-1 wired together. Also handles `-register` and `-delete-profile`. | `go run ./cmd/ingest -register …` then `go run ./cmd/ingest -email … data/` |
+| **`cmd/server`** | Interactive user management CLI: `-add`, `-list`, `-remove`. Same store as `cmd/api` and `cmd/ingest`. | `go run ./cmd/server -add` |
+| **`cmd/gen`** | Test-fixture generator: writes `users_a.csv` … with controllable cross-file duplicates. | `go run ./cmd/gen -files 4 -rows 250 -dup 15` |
+
+All three user-facing binaries (`cmd/api`, `cmd/ingest`, `cmd/server`)
+share the **same `app.NewRepository` factory** and persist to the
+same `users.json`, so a record created via any one is immediately
+visible to the others.
+
+### Layered architecture
+
+```
+                  ┌──────────────────────────────────────────┐
+  USER-FACING     │   cmd/api    cmd/ingest   cmd/server     │
+                  └──────────────┬───────────┬───────────────┘
+                                 ▼           ▼
+                  ┌──────────────────────────────────────────┐
+  TRANSPORT       │  httpapi.Handler   ingest.Runner   bufio │
+                  │  (gen ServerIface)  (handler chain)      │
+                  └──────────────┬───────────┬───────────────┘
+                                 ▼           ▼
+                  ┌──────────────────────────────────────────┐
+  DOMAIN /        │   user.Service          user.DedupStore  │
+  USE-CASE        │   (Register, Login,     (transient ingest│
+                  │    UpdateUser, …)        dedup gate)     │
+                  └──────────────┬───────────────────────────┘
+                                 ▼
+                  ┌──────────────────────────────────────────┐
+  PERSISTENCE     │  user.Repository (interface)             │
+                  │     ├── jsonfile (default, atomic write) │
+                  │     ├── memory   (test backend)          │
+                  │     └── postgres (stub, returns notImpl) │
+                  └──────────────────────────────────────────┘
+```
+
+The transport layer never imports the storage package. Service and
+DedupStore know about `User` (the value type) but not about how
+records are persisted. The factory (`internal/app/factory.go`) wires
+a `user.Repository` interface from the runtime config — this is the
+strategy seam that lets us swap backends.
+
+### HTTP API endpoints
+
+Spec lives at [`api/openapi.yaml`](api/openapi.yaml); generated
+server interface at [`internal/transport/httpapi/gen/server.gen.go`](internal/transport/httpapi/gen/server.gen.go);
+hand-written impl at [`internal/transport/httpapi/handler.go`](internal/transport/httpapi/handler.go).
+
+| Method | Path | Op | Body / params | Success | Possible failures |
+|---|---|---|---|---|---|
+| `GET` | `/users` | `listUsers` | `?limit=N&offset=M` (defaults 100, 0; max 1000) | `200 [User…]`, `X-Total-Count` header | `400` validation, `500` storage |
+| `POST` | `/users` | `createUser` | `{name, email, password ≥ 8}` | `201 User`, `Location:/users/{id}` | `400` validation/decode, `409` duplicate, `500` |
+| `GET` | `/users/{id}` | `getUser` | path: `id matches ^u-[0-9a-f]+$` | `200 User` | `400`, `404` not found, `500` |
+| `PUT` | `/users/{id}` | `updateUser` | `{name?, email?}` | `200 User` | `400`, `404`, `409` email taken, `500` |
+| `DELETE` | `/users/{id}` | `deleteUser` | — | `204` no content | `400`, `404`, `500` |
+
+Every error response uses the same envelope:
+
+```json
+{ "code": "duplicate_user", "message": "user already exists" }
+```
+
+`User` responses **never** carry the `password_hash` field
+(enforced both by the `User` schema in the spec and by manual field
+copying in `httpapi.toAPIUser`). Tested via
+`TestPasswordHashNeverInResponse`.
+
+### Per-request middleware chain (cmd/api)
+
+```
+client request
+   │
+   ▼
+withRecover            ← any panic below → 500 + error envelope, stack to log
+   │
+   ▼
+withRequestID          ← 8-byte hex; round-tripped on X-Request-Id; logged
+   │
+   ▼
+withAccessLog          ← single info-line per request (method/path/status/dur)
+   │
+   ▼
+withBodyLimit          ← cap r.Body at 1 MiB via http.MaxBytesReader
+   │
+   ▼
+withValidation         ← kin-openapi validates body, query, path against spec
+   │
+   ▼
+generated router (gen.HandlerWithOptions)
+   │
+   ▼
+httpapi.Handler        ← decode → svc.X → toAPIUser → writeJSON
+   │
+   ▼
+user.Service           ← business rules + bcrypt + ID generation
+   │
+   ▼
+user.Repository        ← jsonfile or memory or postgres-stub
+```
+
+### CSV ingest pipeline (cmd/ingest, no auth shown)
+
+```
+runner.Runner
+   ├── for each path: spawn goroutine, derive per-file ctx
+   │      │
+   │      ▼
+   │   processor.CSVProcessor.Stream(ctx, path)
+   │      ├── strip UTF-8 BOM, validate header columns
+   │      └── read row → Record → channel
+   │
+   │      ▼ (range over stream)
+   │   submit closure to pool
+   │      │
+   │      ▼
+   └── pool.Pool ───► worker ───► handler.Chain:
+                                   ├── WithPerWorkerCount   (counts every job)
+                                   ├── WithLogging          (gated by -verbose)
+                                   ├── WithMetrics          (tally outcomes)
+                                   ├── WithCancelCheck      (short-circuit)
+                                   ├── WithDedup            (DedupStore.AddIfNew)
+                                   └── WithProcess          (mock 10–500ms work)
+```
+
+Cancellation cascades: SIGINT → root ctx cancel → per-file ctx cancel
+→ csv goroutine sees ctx.Done() and stops sending → workers see
+`ctx.Done()` mid-sleep and exit early → totals balance.
+
+### Internal packages — purpose + key types
+
+| Package | Purpose | Key exports |
+|---|---|---|
+| `internal/user` | Domain types + Service + DedupStore | `User`, `Repository`, `Service`, `DedupStore`, `AppError`, `IsValidEmail`, `MinPasswordLen` |
+| `internal/storage/jsonfile` | Persistent file-backed `Repository`. Atomic rename on write; lower-cased email index. | `NewUserRepo(path, logger)` |
+| `internal/storage/memory` | In-memory `Repository` (used by tests + ad-hoc runs). | `NewUserRepo(logger)` |
+| `internal/storage/postgres` | Stub returning `ErrPostgresNotImplemented`. Sketch for a future backend. | `NewUserRepo(db)` |
+| `internal/app` | `RepositoryConfig` factory for selecting a strategy at runtime. | `RepositoryConfig`, `NewRepository` |
+| `internal/transport/httpapi` | HTTP handler implementing `gen.ServerInterface`; AppError → status mapper; JSON helpers. | `NewHandler` |
+| `internal/transport/httpapi/gen` | `oapi-codegen` output (committed). | `ServerInterface`, `User`, `Error`, `GetSwagger` |
+| `internal/transport/grpc` | Day-1 toy "gRPC-style" function wrapper. Not real gRPC. Kept for historical context. | `UserHandler.AddUser`, `UserHandler.ListUsers` |
+| `internal/processor` | Strategy interface for record streams + CSV impl. | `Processor`, `Registry`, `CSVProcessor`, `Record` |
+| `internal/pool` | Domain-agnostic worker pool with runtime resize. | `Pool`, `Job`, `WithQueueSize`, `WorkerID(ctx)` |
+| `internal/handler` | Per-record middleware pipeline + Stats counters. | `Handler`, `Middleware`, `Chain`, `Stats`, `Snapshot`, `WithDedup`, `WithProcess`, `WithCancelCheck`, `WithMetrics`, `WithLogging`, `WithPerWorkerCount`, `Outcome` |
+| `internal/repl` | Stdin command interface for the running ingest job. | `Run`, `Controls` |
+| `internal/ingest` | File/folder discovery + per-file driver. | `Expand`, `Runner` |
+| `pkg/logger` | `slog.Logger` factory (text handler, stdout). | `NewLogger` |
+| `pkg/metrics` | Atomic counter for users-added (room to grow). | `Metrics`, `New`, `IncUserAdded`, `UsersAdded` |
+
+### Source-of-truth invariants
+
+- **`api/openapi.yaml` is the contract.** Anything in `gen/` is
+  derived. Edit the spec → `go generate ./...` → fix any compile
+  errors the new `ServerInterface` surfaces.
+- **`user.Repository` is the persistence boundary.** No domain code
+  bypasses it; backends are swapped at the factory.
+- **`user.AppError` codes are the cross-cutting error vocabulary.**
+  HTTP status mapping (`httpapi/errors.go`), CLI exit messages
+  (`cmd/ingest`, `cmd/server`), and log fields all read from the
+  same `Code` enum.
+
+---
+
 ## Quick start
 
 ```bash
