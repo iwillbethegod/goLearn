@@ -35,7 +35,7 @@ type Stats interface {
 	Snapshot() handler.Snapshot
 }
 
-// Counter exposes a count-only readout (e.g. user.Store.Count).
+// Counter exposes a count-only readout (e.g. user.DedupStore.Count).
 type Counter interface {
 	Count() int
 }

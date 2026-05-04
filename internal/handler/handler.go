@@ -58,8 +58,9 @@ func Terminal(_ context.Context, _ string, _ user.User) Outcome {
 	return OutcomeOK
 }
 
-// Deduper is the contract for the dedup gate (satisfied by user.Store).
-// Defining it here keeps the pipeline package free of concrete imports.
+// Deduper is the contract for the dedup gate (satisfied by
+// *user.DedupStore). Defining it here keeps the pipeline package
+// free of concrete imports.
 type Deduper interface {
 	AddIfNew(u user.User) bool
 }

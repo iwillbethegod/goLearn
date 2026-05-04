@@ -1,45 +1,75 @@
-# Day 2 — Concurrent CSV User Ingestion
+# goLearn — Day 1 + Day 2: User Service + Concurrent CSV Ingestion
 
-A worker-pool ingestion pipeline built around a Processor strategy
-interface and a middleware-based handler chain. Multiple files run in
-parallel, the pool resizes at runtime via an interactive REPL,
-duplicates are deduped across files, individual files can be
-cancelled mid-flight without affecting others, and the whole thing is
-race-detector clean.
+Two layered exercises in one repo:
+
+- **Day 1**: a user service with a Strategy-pattern repository
+  (memory / jsonfile / postgres-stub), service layer, and gRPC-style
+  handler. Persistence via a JSON file with bcrypt-hashed passwords.
+- **Day 2**: a concurrent CSV ingestion pipeline built around a
+  Processor strategy interface and a middleware-based handler chain.
+  Multiple files run in parallel, the pool resizes at runtime via an
+  interactive REPL, duplicates are deduped across files, individual
+  files can be cancelled mid-flight, and the whole thing is
+  race-detector clean.
+
+The two are wired together by an authentication layer: every CSV
+ingest run requires a `-login` (email + password) against the day-1
+user store. Profile management (`-register`, `-delete-profile`) is
+exposed on the same CLI.
 
 ## Topics exercised
 
-Goroutines · channels · `sync.WaitGroup` · `sync.Mutex` · `sync/atomic`
-· `context` propagation · the race detector · strategy pattern ·
-middleware chain · `log/slog` · functional options.
+**Day 1**: Strategy pattern · interface segregation · service layer ·
+file-backed persistence · `log/slog` · `sync.RWMutex` · bcrypt.
+
+**Day 2**: Goroutines · channels · `sync.WaitGroup` · `sync.Mutex` ·
+`sync/atomic` · `context` propagation · the race detector · middleware
+chain · functional options.
 
 ## Layout
 
 ```
 cmd/
   gen/        generates sample CSVs with cross-file duplicates
-  ingest/     CLI entrypoint (main.go), config + flag parsing,
-              summary printer, and the ProcessRow mock fixture
+  ingest/     authenticated CSV ingestion CLI
+              (register, login, ingest, delete-profile)
+  server/     interactive user-management CLI
+              (-add, -remove, -list)
 internal/
-  user/       User struct + concurrency-safe AddIfNew store
-  processor/  Processor interface + Registry + CSVProcessor
-              (strategy pattern over input format)
+  user/       User model, Repository interface, Service (Register,
+              Login, AddUser, DeleteByEmail, RemoveUser, …),
+              transient DedupStore for ingest-side dedup,
+              email-validation regex, AppError taxonomy.
+  storage/
+    jsonfile/   persistent file-backed user.Repository (atomic
+                rename-on-write, lower-cased email index).
+    memory/     in-memory user.Repository (also satisfies the
+                interface; used by tests and ad-hoc runs).
+    postgres/   stub implementation returning ErrPostgresNotImplemented.
+  app/        factory: NewRepository(cfg) — strategy switch over
+              memory / jsonfile / postgres.
+  processor/  Processor interface + Registry + CSVProcessor.
   pool/       Domain-agnostic worker pool: Submit(ctx, fn). Workers
               inject their ID via context value; nothing else.
   handler/    Per-record pipeline: Outcome, Handler, Middleware,
-              Chain, Stats/Snapshot, and the middleware constructors
+              Chain, Stats/Snapshot, and middleware constructors
               (CancelCheck, Dedup, Process, Metrics, Logging,
               PerWorkerCount).
   ingest/     File/folder discovery + per-file driver. Submits one
               closure per record into the pool; closures invoke the
-              handler chain. Tracks per-file cancel funcs by basename.
-  repl/       Stdin command interface (add/remove/status/files/cancel/
-              quit). Depends only on small interfaces, not concrete
-              pool / runner / store types.
+              handler chain.
+  repl/       Stdin command interface for the running ingest job
+              (add/remove/status/files/cancel/quit) over small
+              interfaces.
+  transport/grpc/  toy in-process handler that wraps user.Service.
+  external/maps/   placeholder external service.
+pkg/
+  logger/   slog default-handler factory.
+  metrics/  trivial counter (UsersAdded).
 ```
 
-Module path: `github.com/ashishsinghbhadoria/goLearn`. Go 1.22, zero
-third-party dependencies.
+Module path: `github.com/ashishsinghbhadoria/goLearn`. Go 1.22.
+Single dependency: `golang.org/x/crypto/bcrypt`.
 
 ### Dependency direction
 
@@ -74,31 +104,78 @@ go build -race -o /tmp/ingest_race ./cmd/ingest
 # 2. Generate fixtures (4 files × 250 rows = 1000, ~15% dups).
 go run ./cmd/gen -files 4 -rows 250 -dup 15
 
-# 3. Folder ingest with default work mock (10–500ms per record).
-/tmp/ingest_race -workers 8 -queue 64 data/
+# 3. Register a user. Persisted to .data/users.json by default.
+/tmp/ingest_race -register \
+  -email alice@example.com -name Alice -password secret123
 
-# 4. Per-file cancellation demo.
+# 4. Run an ingest as that user (login is required).
+/tmp/ingest_race -workers 8 -queue 64 \
+  -email alice@example.com -password secret123 \
+  data/
+
+# 5. Per-file cancellation demo.
 /tmp/ingest_race -workers 8 -repl=false \
+  -email alice@example.com -password secret123 \
   -cancel users_b.csv -cancel-after 50ms data/
 
-# 5. High-throughput run with sub-millisecond mock work.
+# 6. High-throughput run with sub-millisecond mock work.
 /tmp/ingest_race -workers 8 -queue 1024 -repl=false \
+  -email alice@example.com -password secret123 \
   -work-min 10us -work-max 100us data_1m/
 
-# 6. Verbose mode — one structured log line per record.
-/tmp/ingest_race -workers 4 -repl=false -verbose data_10/
+# 7. Pass the password via env var instead of -password.
+INGEST_PASSWORD=secret123 /tmp/ingest_race \
+  -workers 4 -repl=false -email alice@example.com data_10/
+
+# 8. Delete the user's own profile.
+/tmp/ingest_race -delete-profile \
+  -email alice@example.com -password secret123
 ```
 
 You can pass any mix of files and folders. Folders are scanned
 non-recursively for files matching the active processor's extension.
+
+The legacy interactive CLI is still available:
+
+```bash
+go run ./cmd/server -add        # prompts for name, email, password
+go run ./cmd/server -list       # list all users
+go run ./cmd/server -remove     # interactive removal by ID (no auth)
+```
+
+`cmd/server -add` calls the same `Service.Register` so users created
+this way can log in via `cmd/ingest`.
 
 ---
 
 ## CLI reference
 
 ```
-ingest [flags] <path> [<path> ...]
+ingest [auth flags] [-register | -delete-profile | <path> [<path> ...]]
 ```
+
+The CLI runs in one of three modes:
+
+1. **Register** — `-register -email -name -password`. Creates a user
+   in the persistent store and exits.
+2. **Delete profile** — `-delete-profile -email -password`. Verifies
+   the password, removes the user, exits.
+3. **Ingest** (default) — `-email -password <path> ...`. Logs in,
+   then runs the concurrent CSV pipeline.
+
+### Auth flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-register` | `false` | Register a new user and exit. Requires `-email -name -password`. |
+| `-delete-profile` | `false` | Authenticate and delete the user's profile, then exit. |
+| `-email` | `""` | User email (login or register). |
+| `-password` | `""` | User password. Falls back to `$INGEST_PASSWORD` if empty. Min 8 chars on register. |
+| `-name` | `""` | User name (register only). |
+| `-store-path` | `.data/users.json` | Path to the persistent user store. |
+| `-storage` | `jsonfile` | Storage strategy (`memory` or `jsonfile`). |
+
+### Ingest flags (require login)
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -159,7 +236,40 @@ cancelled file=users_b.csv
 
 ## Design
 
-### Processor strategy
+### Authentication & user store
+
+`internal/user/Service` is the single entrypoint for credential
+operations. It composes a `Repository` (storage) with bcrypt hashing
+and email validation:
+
+```go
+func (s *Service) Register(ctx, name, email, password string) (User, error)
+func (s *Service) Login(ctx, email, password string) (User, error)
+func (s *Service) DeleteByEmail(ctx, email, password string) error
+```
+
+`Login` and `DeleteByEmail` both return `ErrInvalidCredential` for
+*any* auth failure (wrong email, no such user, wrong password) so the
+CLI cannot leak which one is incorrect.
+
+Storage is selected by the `app.NewRepository` factory:
+
+| Strategy | Use |
+|---|---|
+| `jsonfile` (default) | atomic-rename writes to `.data/users.json`. |
+| `memory` | in-process map; lost on exit. Used by tests. |
+| `postgres` | stub returning `ErrPostgresNotImplemented`. |
+
+Passwords are bcrypt-hashed at the `DefaultCost` (10). Empty
+`PasswordHash` means the record predates auth — those users cannot
+log in, but the CLI lists them and removes them (compat with the
+day-1 `cmd/server -add` flow before the password field existed).
+
+The `Repository` interface satisfies Go's idiomatic
+"accept interfaces, return concrete" — `Service` only sees the
+interface; concrete repos are wired by `app.NewRepository`.
+
+
 
 Every input format is a `Processor`:
 
