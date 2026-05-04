@@ -17,7 +17,10 @@ import (
 // registration. 8 is a defensible default for a learning project.
 const MinPasswordLen = 8
 
-const loginFailedMsg = "login failed"
+const (
+	loginFailedMsg       = "login failed"
+	invalidEmailFmtMsg   = "invalid email format"
+)
 
 type Service struct {
 	repo    Repository
@@ -46,7 +49,7 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (User, error)
 	}
 
 	if !IsValidEmail(trimmedEmail) {
-		s.logger.Error("invalid email format", "error", ErrInvalidEmail, "email", trimmedEmail)
+		s.logger.Error(invalidEmailFmtMsg, "error", ErrInvalidEmail, "email", trimmedEmail)
 		return User{}, ErrInvalidEmail
 	}
 
@@ -95,6 +98,53 @@ func (s *Service) generateID() string {
 	return fmt.Sprintf("u-%d", time.Now().UnixNano())
 }
 
+// GetUser returns the user with the given ID.
+func (s *Service) GetUser(ctx context.Context, id string) (User, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return User{}, ErrInvalidUser
+	}
+	u, err := s.repo.Get(id)
+	if err != nil {
+		s.logger.Debug("repository get failed", "error", err, "user_id", id)
+		return User{}, err
+	}
+	return u, nil
+}
+
+// UpdateUser modifies the name and/or email on an existing user.
+// An empty name or email leaves that field unchanged. Email changes
+// are validated for format and checked for collision against other
+// users by the repository.
+func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (User, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return User{}, ErrInvalidUser
+	}
+	current, err := s.repo.Get(id)
+	if err != nil {
+		return User{}, err
+	}
+	trimmedName := strings.TrimSpace(name)
+	trimmedEmail := strings.TrimSpace(email)
+	if trimmedName != "" {
+		current.Name = trimmedName
+	}
+	if trimmedEmail != "" {
+		if !IsValidEmail(trimmedEmail) {
+			s.logger.Error(invalidEmailFmtMsg, "error", ErrInvalidEmail, "email", trimmedEmail)
+			return User{}, ErrInvalidEmail
+		}
+		current.Email = trimmedEmail
+	}
+	if err := s.repo.Update(current); err != nil {
+		s.logger.Error("repository failed to update user", "error", err, "user_id", id)
+		return User{}, err
+	}
+	s.logger.Info("user updated", "user_id", id)
+	return current, nil
+}
+
 // Register creates a new user with a bcrypt-hashed password and
 // persists them via the repository.
 func (s *Service) Register(ctx context.Context, name, email, password string) (User, error) {
@@ -105,7 +155,7 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (U
 		return User{}, ErrInvalidUser
 	}
 	if !IsValidEmail(trimmedEmail) {
-		s.logger.Error("invalid email format", "error", ErrInvalidEmail, "email", trimmedEmail)
+		s.logger.Error(invalidEmailFmtMsg, "error", ErrInvalidEmail, "email", trimmedEmail)
 		return User{}, ErrInvalidEmail
 	}
 	if len(password) < MinPasswordLen {

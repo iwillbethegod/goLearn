@@ -58,6 +58,19 @@ func (r *UserRepo) Add(u user.User) error {
 	return nil
 }
 
+func (r *UserRepo) Get(id string) (user.User, error) {
+	if strings.TrimSpace(id) == "" {
+		return user.User{}, user.ErrInvalidUser
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	u, found := r.users[id]
+	if !found {
+		return user.User{}, user.ErrUserNotFound
+	}
+	return u, nil
+}
+
 func (r *UserRepo) GetByEmail(email string) (user.User, error) {
 	emailKey := strings.ToLower(strings.TrimSpace(email))
 	if emailKey == "" {
@@ -70,6 +83,52 @@ func (r *UserRepo) GetByEmail(email string) (user.User, error) {
 		return user.User{}, user.ErrUserNotFound
 	}
 	return r.users[id], nil
+}
+
+// Update overwrites the user record at u.ID. Email re-indexing is
+// transactional: an email change that collides with another user
+// returns ErrDuplicateUser without mutating state.
+func (r *UserRepo) Update(u user.User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	prev, found := r.users[u.ID]
+	if !found {
+		return user.ErrUserNotFound
+	}
+	newKey := strings.ToLower(strings.TrimSpace(u.Email))
+	if newKey == "" {
+		return user.ErrInvalidUser
+	}
+	prevKey := strings.ToLower(strings.TrimSpace(prev.Email))
+
+	if newKey != prevKey {
+		if _, taken := r.emails[newKey]; taken {
+			return user.ErrDuplicateUser
+		}
+	}
+
+	// Preserve fields the caller didn't intend to overwrite.
+	if u.PasswordHash == "" {
+		u.PasswordHash = prev.PasswordHash
+	}
+	r.users[u.ID] = u
+	if newKey != prevKey {
+		delete(r.emails, prevKey)
+		r.emails[newKey] = u.ID
+	}
+
+	if err := r.saveLocked(); err != nil {
+		// Roll back the in-memory mutation on persist failure.
+		r.users[u.ID] = prev
+		if newKey != prevKey {
+			delete(r.emails, newKey)
+			r.emails[prevKey] = u.ID
+		}
+		return err
+	}
+	r.logger.Info("user updated", "user_id", u.ID)
+	return nil
 }
 
 func (r *UserRepo) List() ([]user.User, error) {

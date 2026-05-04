@@ -1,0 +1,229 @@
+openapi: 3.0.3
+info:
+  title: goLearn User API
+  description: |
+    REST API for managing users. Wraps the day-1 user service so any
+    record created via this API is visible to the cmd/server and
+    cmd/ingest CLIs (and vice versa) since they share the same
+    persistent store.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: local dev
+
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      summary: List all users
+      tags: [users]
+      responses:
+        '200':
+          description: List of users (possibly empty).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '500':
+          $ref: '#/components/responses/Internal'
+    post:
+      operationId: createUser
+      summary: Register a new user
+      description: |
+        Creates a new user record with a bcrypt-hashed password.
+        The hash is stored server-side and never returned.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          headers:
+            Location:
+              description: URL of the created resource.
+              schema: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/UserID'
+    get:
+      operationId: getUser
+      summary: Get a user by ID
+      tags: [users]
+      responses:
+        '200':
+          description: User found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+    put:
+      operationId: updateUser
+      summary: Update a user's name and/or email
+      description: |
+        Either field may be omitted to leave it unchanged.
+        Password changes are not supported by this endpoint.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: deleteUser
+      summary: Delete a user by ID
+      tags: [users]
+      responses:
+        '204':
+          description: User deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+components:
+  parameters:
+    UserID:
+      name: id
+      in: path
+      required: true
+      description: User identifier (`u-` prefix + nanosecond timestamp).
+      schema:
+        type: string
+        pattern: '^u-\d+$'
+
+  schemas:
+    User:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: string
+          example: u-1777885347375949000
+        name:
+          type: string
+          minLength: 1
+          example: Alice
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+
+    CreateUserRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    UpdateUserRequest:
+      type: object
+      description: At least one field must be provided.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error identifier.
+          enum:
+            - validation_failed
+            - duplicate_user
+            - invalid_user
+            - invalid_email
+            - invalid_password
+            - user_not_found
+            - storage_error
+            - internal_error
+        message:
+          type: string
+          description: Human-readable explanation.
+
+  responses:
+    BadRequest:
+      description: Request failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Email already in use by another user.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Internal:
+      description: Internal server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: |
+        Reserved for a future day. Not enforced today; declared so
+        clients and codegen tools know the planned auth shape.

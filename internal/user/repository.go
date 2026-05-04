@@ -65,7 +65,9 @@ var (
 
 type Repository interface {
 	Add(User) error
+	Get(id string) (User, error)
 	GetByEmail(email string) (User, error)
+	Update(User) error
 	Remove(userID string) error
 	List() ([]User, error)
 }

@@ -21,8 +21,16 @@ func (r *UserRepo) Add(u user.User) error {
 	return ErrPostgresNotImplemented
 }
 
+func (r *UserRepo) Get(id string) (user.User, error) {
+	return user.User{}, ErrPostgresNotImplemented
+}
+
 func (r *UserRepo) GetByEmail(email string) (user.User, error) {
 	return user.User{}, ErrPostgresNotImplemented
+}
+
+func (r *UserRepo) Update(u user.User) error {
+	return ErrPostgresNotImplemented
 }
 
 func (r *UserRepo) List() ([]user.User, error) {

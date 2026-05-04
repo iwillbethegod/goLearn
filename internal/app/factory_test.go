@@ -157,3 +157,80 @@ func TestRemoveNonexistentUser(t *testing.T) {
 		t.Fatalf("expected ErrUserNotFound, got %v", err)
 	}
 }
+
+// --- Day 3: Get / Update -----------------------------------------------------
+
+func newSvc(t *testing.T) *user.Service {
+	t.Helper()
+	log := logger.NewLogger()
+	repo, err := NewRepository(RepositoryConfig{Type: TypeMemory, Logger: log})
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	return user.NewService(repo, log, metrics.New())
+}
+
+func TestGetUser(t *testing.T) {
+	svc := newSvc(t)
+	u, err := svc.AddUser(context.Background(), "Eve", "eve@example.com")
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	got, err := svc.GetUser(context.Background(), u.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ID != u.ID || got.Email != u.Email {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", got, u)
+	}
+}
+
+func TestGetMissingUser(t *testing.T) {
+	svc := newSvc(t)
+	_, err := svc.GetUser(context.Background(), "u-nonexistent")
+	if !errors.Is(err, user.ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got %v", err)
+	}
+}
+
+func TestUpdateUserName(t *testing.T) {
+	svc := newSvc(t)
+	u, _ := svc.AddUser(context.Background(), "Frank", "frank@example.com")
+	got, err := svc.UpdateUser(context.Background(), u.ID, "Frank Renamed", "")
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got.Name != "Frank Renamed" {
+		t.Fatalf("name not updated: %q", got.Name)
+	}
+	if got.Email != u.Email {
+		t.Fatalf("email should be unchanged: %q", got.Email)
+	}
+}
+
+func TestUpdateUserEmailCollision(t *testing.T) {
+	svc := newSvc(t)
+	a, _ := svc.AddUser(context.Background(), "A", "a@example.com")
+	_, _ = svc.AddUser(context.Background(), "B", "b@example.com")
+	_, err := svc.UpdateUser(context.Background(), a.ID, "", "b@example.com")
+	if !errors.Is(err, user.ErrDuplicateUser) {
+		t.Fatalf("expected ErrDuplicateUser, got %v", err)
+	}
+}
+
+func TestUpdateUserInvalidEmail(t *testing.T) {
+	svc := newSvc(t)
+	u, _ := svc.AddUser(context.Background(), "G", "g@example.com")
+	_, err := svc.UpdateUser(context.Background(), u.ID, "", "not-an-email")
+	if !errors.Is(err, user.ErrInvalidEmail) {
+		t.Fatalf("expected ErrInvalidEmail, got %v", err)
+	}
+}
+
+func TestUpdateMissingUser(t *testing.T) {
+	svc := newSvc(t)
+	_, err := svc.UpdateUser(context.Background(), "u-nope", "X", "x@example.com")
+	if !errors.Is(err, user.ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got %v", err)
+	}
+}

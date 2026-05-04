@@ -1,6 +1,6 @@
-# goLearn — Day 1 + Day 2: User Service + Concurrent CSV Ingestion
+# goLearn — Day 1 + Day 2 + Day 3: User Service + Concurrent CSV Ingestion + REST API
 
-Two layered exercises in one repo:
+Three layered exercises in one repo:
 
 - **Day 1**: a user service with a Strategy-pattern repository
   (memory / jsonfile / postgres-stub), service layer, and gRPC-style
@@ -11,11 +11,18 @@ Two layered exercises in one repo:
   interactive REPL, duplicates are deduped across files, individual
   files can be cancelled mid-flight, and the whole thing is
   race-detector clean.
+- **Day 3**: a contract-first REST API on top of the day-1 service.
+  `api/openapi.yaml` is the source of truth; `oapi-codegen` produces
+  the server interface and types; a hand-written handler implements
+  the interface against `user.Service`; request validation is
+  enforced by middleware before handlers run.
 
-The two are wired together by an authentication layer: every CSV
-ingest run requires a `-login` (email + password) against the day-1
-user store. Profile management (`-register`, `-delete-profile`) is
-exposed on the same CLI.
+The CSV ingester (`cmd/ingest`) is gated behind email + password
+auth against the day-1 user store. The REST API (`cmd/api`) is
+unauthenticated for now; the spec declares `BasicAuth` under
+`securitySchemes` for a future flip-on. All three CLIs (`cmd/api`,
+`cmd/ingest`, `cmd/server`) share the same persistent store, so a
+user registered via one is visible to the others.
 
 ## Topics exercised
 
@@ -26,10 +33,21 @@ file-backed persistence · `log/slog` · `sync.RWMutex` · bcrypt.
 `sync/atomic` · `context` propagation · the race detector · middleware
 chain · functional options.
 
+**Day 3**: OpenAPI 3.0 · contract-first design · `oapi-codegen`
+(std-http-server target) · request validation via the kin-openapi
+middleware · `//go:generate` workflow · tool-dependency pinning via
+build-tag-gated `tools/tools.go`.
+
 ## Layout
 
 ```
+api/
+  openapi.yaml             ← contract-first OpenAPI 3.0 spec
+  postman_collection.json  ← exported Postman collection
+tools/
+  tools.go                 ← build-tag-pinned oapi-codegen tool
 cmd/
+  api/        HTTP API server entrypoint (Day 3)
   gen/        generates sample CSVs with cross-file duplicates
   ingest/     authenticated CSV ingestion CLI
               (register, login, ingest, delete-profile)
@@ -61,15 +79,28 @@ internal/
   repl/       Stdin command interface for the running ingest job
               (add/remove/status/files/cancel/quit) over small
               interfaces.
-  transport/grpc/  toy in-process handler that wraps user.Service.
+  transport/
+    grpc/      toy in-process handler that wraps user.Service.
+    httpapi/   HTTP handler implementing the generated ServerInterface,
+               error mapper, JSON helpers; sub-package gen/ holds the
+               oapi-codegen output (regenerated via go generate).
   external/maps/   placeholder external service.
 pkg/
   logger/   slog default-handler factory.
   metrics/  trivial counter (UsersAdded).
 ```
 
-Module path: `github.com/ashishsinghbhadoria/goLearn`. Go 1.22.
-Single dependency: `golang.org/x/crypto/bcrypt`.
+Module path: `github.com/ashishsinghbhadoria/goLearn`. Go 1.22+
+(some Day-3 transitive deps require 1.25+ at build time).
+
+**Direct runtime dependencies**:
+- `golang.org/x/crypto/bcrypt` — password hashing (Day 1).
+- `github.com/oapi-codegen/runtime` — generated-code helpers (Day 3).
+- `github.com/oapi-codegen/nethttp-middleware` — request validator (Day 3).
+- `github.com/getkin/kin-openapi` — OpenAPI spec parser (Day 3).
+
+**Build-only**: `github.com/oapi-codegen/oapi-codegen/v2` (pinned in
+`tools/tools.go`, runs only during `go generate`).
 
 ### Dependency direction
 
@@ -191,6 +222,148 @@ The CLI runs in one of three modes:
 
 `<path>` may be a file or a directory. Mixed inputs work
 (`./users_a.csv data_10k/`).
+
+---
+
+## Day 3 — REST API (contract-first with OpenAPI + oapi-codegen)
+
+### Workflow
+
+```
+api/openapi.yaml                       ← you edit this (the contract)
+       │
+       ▼ go generate ./...             ← oapi-codegen reads the spec
+internal/transport/httpapi/gen/        ← deterministic, checked in
+  └── server.gen.go                    ← ServerInterface, types, swagger
+       │
+       ▼ implements
+internal/transport/httpapi/handler.go  ← hand-written, calls user.Service
+       │
+       ▼ wired by
+cmd/api/main.go                        ← validator middleware + std mux
+```
+
+The OpenAPI spec is the single source of truth. Changing an endpoint
+or schema is a four-step loop: edit `api/openapi.yaml`, run
+`go generate ./...`, fix any new compile errors in `handler.go`
+(the generated `ServerInterface` will demand the new method or new
+field), commit.
+
+### Run the API server
+
+```bash
+# 1. (optional) regenerate from the spec — required if you edited the spec.
+go generate ./...
+
+# 2. Build and run.
+go build -o /tmp/golearn-api ./cmd/api
+/tmp/golearn-api -addr :8080 -store-path .data/users.json
+```
+
+Flags:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-addr` | `:8080` | TCP listen address. |
+| `-store-path` | `.data/users.json` | Persistent user store file. |
+| `-storage` | `jsonfile` | `memory` or `jsonfile`. |
+| `-shutdown-timeout` | `5s` | Graceful shutdown grace period. |
+
+### Endpoints
+
+| Method | Path | Operation | Body | Status codes |
+|---|---|---|---|---|
+| `GET` | `/users` | listUsers | — | `200`, `500` |
+| `POST` | `/users` | createUser | `CreateUserRequest` | `201`, `400`, `409`, `500` |
+| `GET` | `/users/{id}` | getUser | — | `200`, `400`, `404`, `500` |
+| `PUT` | `/users/{id}` | updateUser | `UpdateUserRequest` | `200`, `400`, `404`, `409`, `500` |
+| `DELETE` | `/users/{id}` | deleteUser | — | `204`, `400`, `404`, `500` |
+
+`CreateUserRequest = {name, email, password}` (password ≥ 8 chars).
+`UpdateUserRequest = {name?, email?}` (password change is **not** in scope for Day 3).
+`User` responses never carry the `password_hash` field.
+
+Errors share a single envelope: `{"code": "...", "message": "..."}`.
+
+| AppError code | HTTP |
+|---|---|
+| `duplicate_user` | 409 |
+| `invalid_user` / `invalid_email` / `invalid_password` | 400 |
+| `user_not_found` | 404 |
+| `invalid_credential` | 401 (reserved for a future auth flip-on) |
+| `storage_error` | 500 |
+| validator middleware | 400 (`code: "validation_failed"`) |
+
+### Smoke test the running API
+
+```bash
+# Create a user.
+ID=$(curl -s -XPOST localhost:8080/users \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Alice","email":"alice@example.com","password":"secret123"}' \
+  | jq -r .id)
+
+# Read it back.
+curl -s localhost:8080/users/$ID
+
+# Update name.
+curl -s -XPUT localhost:8080/users/$ID \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Alice Renamed"}'
+
+# List.
+curl -s localhost:8080/users
+
+# Delete.
+curl -i -XDELETE localhost:8080/users/$ID    # → 204
+
+# Validation failures (caught by middleware before reaching the handler):
+curl -s -XPOST localhost:8080/users -H 'Content-Type: application/json' \
+  -d '{"name":"X","password":"secret123"}'        # missing email → 400
+curl -s -XPOST localhost:8080/users -H 'Content-Type: application/json' \
+  -d '{"name":"X","email":"x@example.com","password":"short"}'  # short pw → 400
+curl -s localhost:8080/users/not-a-valid-id        # bad id pattern → 400
+```
+
+The API server reuses the **same** `app.NewRepository` factory as
+`cmd/server` and `cmd/ingest`, so a user created via `POST /users` is
+immediately visible via `cmd/server -list` and can log in to
+`cmd/ingest`.
+
+### Two layers of validation
+
+1. **Spec-level** — `nethttpmiddleware.OapiRequestValidator(swagger)`
+   validates every request body, query param, and path param against
+   the embedded spec **before** the handler runs. Rejected requests
+   return 400 with `code: "validation_failed"`.
+2. **Service-level** — `Service.Register` / `UpdateUser` still
+   validate (password length, email regex, etc.) so the same rules
+   apply to non-HTTP transports (`cmd/ingest`, `cmd/server`).
+
+### Postman collection
+
+`api/postman_collection.json` is exported from the spec so you can
+import directly:
+
+```bash
+# Postman → File → Import → api/postman_collection.json
+# Or regenerate from the latest spec:
+npx -y openapi-to-postmanv2 -s api/openapi.yaml -o api/postman_collection.json -p
+```
+
+Postman also imports `api/openapi.yaml` directly via File → Import.
+
+### Regenerate after spec changes
+
+```bash
+go generate ./...   # invokes oapi-codegen via tools/tools.go
+go test ./...
+```
+
+The `//go:generate` directive lives at
+`internal/transport/httpapi/gen/gen.go`. Tool dependency is pinned in
+`tools/tools.go` under the `tools` build tag so the codegen tool
+never ends up in any production binary.
 
 ---
 

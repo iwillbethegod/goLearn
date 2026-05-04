@@ -44,6 +44,50 @@ func (r *UserRepo) Add(u user.User) error {
 	return nil
 }
 
+// Get returns the user with the given ID, or ErrUserNotFound.
+func (r *UserRepo) Get(id string) (user.User, error) {
+	if strings.TrimSpace(id) == "" {
+		return user.User{}, user.ErrInvalidUser
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	u, found := r.users[id]
+	if !found {
+		return user.User{}, user.ErrUserNotFound
+	}
+	return u, nil
+}
+
+// Update overwrites the user record at u.ID. Detects email collision
+// against another user before mutating.
+func (r *UserRepo) Update(u user.User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	prev, found := r.users[u.ID]
+	if !found {
+		return user.ErrUserNotFound
+	}
+	newKey := strings.ToLower(strings.TrimSpace(u.Email))
+	if newKey == "" {
+		return user.ErrInvalidUser
+	}
+	prevKey := strings.ToLower(strings.TrimSpace(prev.Email))
+	if newKey != prevKey {
+		if _, taken := r.emails[newKey]; taken {
+			return user.ErrDuplicateUser
+		}
+		delete(r.emails, prevKey)
+		r.emails[newKey] = u.ID
+	}
+	if u.PasswordHash == "" {
+		u.PasswordHash = prev.PasswordHash
+	}
+	r.users[u.ID] = u
+	r.logger.Debug("user updated in memory", "user_id", u.ID)
+	return nil
+}
+
 // GetByEmail returns the user with the given email (case-insensitive,
 // whitespace-insensitive lookup).
 func (r *UserRepo) GetByEmail(email string) (user.User, error) {
