@@ -1,11 +1,20 @@
 // Package main is the HTTP API server entrypoint. It wires the
 // generated OpenAPI router (oapi-codegen std-http-server) to the
 // day-1 user service via the day-3 httpapi.Handler.
+//
+// Middleware chain (outermost first):
+//
+//	withRecover         → panics become 500 + JSON envelope
+//	withRequestID       → 8-byte hex id, propagated via ctx + header
+//	withAccessLog       → one structured line per completed request
+//	withBodyLimit       → 1 MiB cap on request bodies
+//	withValidation      → kin-openapi spec validation (returns 400 envelope)
+//	(generated router)
+//	  → httpapi.Handler  → user.Service → repository
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,9 +24,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/getkin/kin-openapi/openapi3"
-	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi"
@@ -31,6 +37,9 @@ func main() {
 	storePath := flag.String("store-path", ".data/users.json", "user store path")
 	storage := flag.String("storage", "jsonfile", "storage strategy: memory or jsonfile")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 5*time.Second, "graceful shutdown grace period")
+	readTimeout := flag.Duration("read-timeout", 10*time.Second, "max request read time including body")
+	writeTimeout := flag.Duration("write-timeout", 10*time.Second, "max time before writing response")
+	idleTimeout := flag.Duration("idle-timeout", 60*time.Second, "keep-alive idle timeout")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -52,16 +61,17 @@ func main() {
 		logger.Error("load embedded openapi spec", "err", err)
 		os.Exit(1)
 	}
-	// The spec declares servers; clearing them lets the validator
-	// accept any host (localhost, 127.0.0.1, behind a proxy, ...).
-	swagger.Servers = nil
+	swagger.Servers = nil // accept any host (validator otherwise rejects /)
 
 	mux := http.NewServeMux()
 	gen.HandlerWithOptions(h, gen.StdHTTPServerOptions{
 		BaseRouter: mux,
 		Middlewares: []gen.MiddlewareFunc{
-			validationMiddleware(swagger),
-			accessLog(logger),
+			withRecover(logger),
+			withRequestID(),
+			withAccessLog(logger),
+			withBodyLimit(),
+			withValidation(swagger),
 		},
 		ErrorHandlerFunc: writeRouterError,
 	})
@@ -70,6 +80,10 @@ func main() {
 		Addr:              *addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       *readTimeout,
+		WriteTimeout:      *writeTimeout,
+		IdleTimeout:       *idleTimeout,
+		MaxHeaderBytes:    1 << 14, // 16 KiB
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -93,58 +107,4 @@ func main() {
 		logger.Error("shutdown error", "err", err)
 		fmt.Fprintln(os.Stderr, err)
 	}
-}
-
-// validationMiddleware wraps the kin-openapi validator with a custom
-// JSON error response so client-visible 400s match the spec's Error
-// envelope shape rather than the validator's default plaintext.
-func validationMiddleware(swagger *openapi3.T) gen.MiddlewareFunc {
-	opts := &nethttpmiddleware.Options{
-		ErrorHandlerWithOpts: func(_ context.Context, err error, w http.ResponseWriter, _ *http.Request, _ nethttpmiddleware.ErrorHandlerOpts) {
-			writeJSONError(w, http.StatusBadRequest, "validation_failed", err.Error())
-		},
-	}
-	return nethttpmiddleware.OapiRequestValidatorWithOptions(swagger, opts)
-}
-
-// writeRouterError handles errors from the generated router itself
-// (e.g. invalid path-param format detected by the wrapper before the
-// validator middleware runs).
-func writeRouterError(w http.ResponseWriter, _ *http.Request, err error) {
-	writeJSONError(w, http.StatusBadRequest, "validation_failed", err.Error())
-}
-
-func writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"code":    code,
-		"message": message,
-	})
-}
-
-// accessLog logs one line per request after it completes. The status
-// code is captured by wrapping the ResponseWriter.
-func accessLog(logger *slog.Logger) gen.MiddlewareFunc {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			start := time.Now()
-			rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(rw, r)
-			logger.Info("http",
-				"method", r.Method, "path", r.URL.Path,
-				"status", rw.status, "dur", time.Since(start),
-			)
-		})
-	}
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(s int) {
-	r.status = s
-	r.ResponseWriter.WriteHeader(s)
 }
