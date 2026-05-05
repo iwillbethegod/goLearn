@@ -74,7 +74,11 @@ func addUserInteractive(service *user.Service) error {
 	email, _ := reader.ReadString('\n')
 	email = strings.TrimSpace(email)
 
-	addedUser, err := service.AddUser(context.Background(), name, email)
+	fmt.Printf("Enter password (min %d chars): ", user.MinPasswordLen)
+	password, _ := reader.ReadString('\n')
+	password = strings.TrimSpace(password)
+
+	addedUser, err := service.Register(context.Background(), name, email, password)
 	if err != nil {
 		service.Logger().Error("failed to add user", "error", err, "user_id", "n/a")
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -88,7 +92,7 @@ func addUserInteractive(service *user.Service) error {
 
 func removeUserInteractive(service *user.Service) error {
 	// First list all users
-	users, err := service.ListUsers()
+	users, err := service.ListUsers(context.Background())
 	if err != nil {
 		service.Logger().Error("failed to list users", "error", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -131,7 +135,7 @@ func removeUserInteractive(service *user.Service) error {
 }
 
 func listUsers(service *user.Service) error {
-	users, err := service.ListUsers()
+	users, err := service.ListUsers(context.Background())
 	if err != nil {
 		service.Logger().Error("failed to list users", "error", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

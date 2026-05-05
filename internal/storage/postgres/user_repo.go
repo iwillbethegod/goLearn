@@ -1,8 +1,11 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
@@ -17,15 +20,27 @@ func NewUserRepo(db *sql.DB) *UserRepo {
 	return &UserRepo{db: db}
 }
 
-func (r *UserRepo) Add(u user.User) error {
+func (r *UserRepo) Add(ctx context.Context, u model.User) error {
 	return ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) List() ([]user.User, error) {
+func (r *UserRepo) Get(ctx context.Context, id string) (model.User, error) {
+	return model.User{}, ErrPostgresNotImplemented
+}
+
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (model.User, error) {
+	return model.User{}, ErrPostgresNotImplemented
+}
+
+func (r *UserRepo) Update(ctx context.Context, u model.User) error {
+	return ErrPostgresNotImplemented
+}
+
+func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
 	return nil, ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) Remove(userID string) error {
+func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	return ErrPostgresNotImplemented
 }
 

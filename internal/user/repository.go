@@ -1,66 +1,24 @@
+// Package user holds the domain service + dedup gate. Data-bearing
+// types (User, AppError, validation helpers) live in internal/model;
+// behavior (Repository contract, Service business rules, DedupStore)
+// lives here.
 package user
 
-import "regexp"
+import (
+	"context"
 
-type ErrorCode string
-
-const (
-	CodeDuplicateUser ErrorCode = "duplicate_user"
-	CodeInvalidUser   ErrorCode = "invalid_user"
-	CodeInvalidEmail  ErrorCode = "invalid_email"
-	CodeUserNotFound  ErrorCode = "user_not_found"
-	CodeStorage       ErrorCode = "storage_error"
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 )
 
-// EmailRegex pattern for basic email validation
-const EmailRegex = `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
-
-var emailValidator = regexp.MustCompile(EmailRegex)
-
-// IsValidEmail checks if email matches the basic regex pattern
-func IsValidEmail(email string) bool {
-	return emailValidator.MatchString(email)
-}
-
-type AppError struct {
-	Code    ErrorCode
-	Message string
-	Err     error
-}
-
-func (e *AppError) Error() string {
-	if e.Err == nil {
-		return e.Message
-	}
-	return e.Message + ": " + e.Err.Error()
-}
-
-func (e *AppError) Unwrap() error {
-	return e.Err
-}
-
-func (e *AppError) Is(target error) bool {
-	targetErr, ok := target.(*AppError)
-	return ok && e.Code == targetErr.Code
-}
-
-func NewStorageError(err error) error {
-	return &AppError{
-		Code:    CodeStorage,
-		Message: "storage operation failed",
-		Err:     err,
-	}
-}
-
-var (
-	ErrDuplicateUser = &AppError{Code: CodeDuplicateUser, Message: "user already exists"}
-	ErrInvalidUser   = &AppError{Code: CodeInvalidUser, Message: "invalid user data"}
-	ErrInvalidEmail  = &AppError{Code: CodeInvalidEmail, Message: "invalid email format"}
-	ErrUserNotFound  = &AppError{Code: CodeUserNotFound, Message: "user not found"}
-)
-
+// Repository is the persistence boundary. Implementations live under
+// internal/storage/{jsonfile,memory,postgres}. The interface is
+// defined here (the consumer side) so a new backend doesn't have to
+// import every package that uses User.
 type Repository interface {
-	Add(User) error
-	Remove(userID string) error
-	List() ([]User, error)
+	Add(ctx context.Context, u model.User) error
+	Get(ctx context.Context, id string) (model.User, error)
+	GetByEmail(ctx context.Context, email string) (model.User, error)
+	Update(ctx context.Context, u model.User) error
+	Remove(ctx context.Context, userID string) error
+	List(ctx context.Context) ([]model.User, error)
 }
