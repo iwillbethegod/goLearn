@@ -1,0 +1,10 @@
+# Per-user token-bucket configuration. These values are the day-4
+# defaults from the brief: 20 000 tokens capacity, refilling at
+# 10 000 tokens per minute (~166.67/sec).
+#
+# Override individual fields via env vars without rebuilding:
+#   TOKENS_CAPACITY=50000
+#   TOKENS_RATE_PER_MIN=20000
+
+capacity: 20000
+rate_per_min: 10000

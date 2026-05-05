@@ -1,8 +1,12 @@
-// Package main is the HTTP API server entrypoint. It wires the
-// generated OpenAPI router (oapi-codegen std-http-server) to the
-// day-1 user service via the day-3 httpapi.Handler.
+// Package main is the user-service entrypoint. It hosts two
+// listeners over the same user.Service + token store:
 //
-// Middleware chain (outermost first):
+//   - HTTP REST on -addr (default :8080) — see middleware chain below.
+//   - gRPC unary RPCs on -grpc-addr (default :9090). The generated
+//     UserService stubs live in proto/gen/userpb; the impl is in
+//     internal/transport/grpc.
+//
+// HTTP middleware chain (outermost first):
 //
 //	withRecover         → panics become 500 + JSON envelope
 //	withRequestID       → 8-byte hex id, propagated via ctx + header
@@ -11,6 +15,12 @@
 //	withValidation      → kin-openapi spec validation (returns 400 envelope)
 //	(generated router)
 //	  → httpapi.Handler  → user.Service → repository
+//
+// gRPC interceptor chain:
+//
+//	grpcAccessLog       → one structured line per completed RPC
+//	(generated dispatch)
+//	  → grpctransport.Server → user.Service / tokens.Store
 package main
 
 import (
@@ -25,7 +35,10 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
+	"github.com/ashishsinghbhadoria/goLearn/internal/tokens"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi/gen"
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
@@ -34,8 +47,10 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
+	grpcAddr := flag.String("grpc-addr", ":9090", "gRPC listen address (empty disables gRPC)")
 	storePath := flag.String("store-path", ".data/users.json", "user store path")
 	storage := flag.String("storage", "jsonfile", "storage strategy: memory or jsonfile")
+	tokensCfgPath := flag.String("tokens-config", "config/tokens.yaml", "token bucket YAML config (env vars override)")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 5*time.Second, "graceful shutdown grace period")
 	readTimeout := flag.Duration("read-timeout", 10*time.Second, "max request read time including body")
 	writeTimeout := flag.Duration("write-timeout", 10*time.Second, "max time before writing response")
@@ -55,6 +70,17 @@ func main() {
 	}
 	svc := user.NewService(repo, logger, metrics.New())
 	h := httpapi.NewHandler(svc, logger)
+
+	tokensCfg, err := tokens.Load(*tokensCfgPath)
+	if err != nil {
+		logger.Error("load tokens config failed", "err", err)
+		os.Exit(1)
+	}
+	tokenStore := tokens.NewStore(tokensCfg)
+	logger.Info("tokens config",
+		"capacity", tokensCfg.Capacity,
+		"rate_per_min", tokensCfg.RatePerMin,
+	)
 
 	swagger, err := gen.GetSwagger()
 	if err != nil {
@@ -99,8 +125,20 @@ func main() {
 		}
 	}()
 
+	var grpcSrv *grpc.Server
+	if *grpcAddr != "" {
+		grpcSrv, err = startGRPC(*grpcAddr, svc, tokenStore, logger)
+		if err != nil {
+			logger.Error("grpc listen failed", "addr", *grpcAddr, "err", err)
+			os.Exit(1)
+		}
+	}
+
 	<-ctx.Done()
 	logger.Info("shutting down")
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop()
+	}
 	shutdownCtx, sCancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 	defer sCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

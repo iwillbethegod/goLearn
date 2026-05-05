@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
 	"github.com/ashishsinghbhadoria/goLearn/internal/handler"
 	"github.com/ashishsinghbhadoria/goLearn/internal/ingest"
@@ -21,6 +24,7 @@ import (
 	"github.com/ashishsinghbhadoria/goLearn/internal/repl"
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 	"github.com/ashishsinghbhadoria/goLearn/pkg/metrics"
+	userpb "github.com/ashishsinghbhadoria/goLearn/proto/gen/userpb"
 )
 
 func main() {
@@ -141,6 +145,22 @@ func runIngest(cfg config, logger *slog.Logger, svc *user.Service) {
 
 	runner := ingest.NewRunner(proc, p, chain, stats, logger)
 
+	// Optional: gRPC token gate. If -grpc-addr is empty, ingest runs
+	// without rate limiting (legacy day-3 behavior).
+	if cfg.grpcAddr != "" {
+		conn, err := grpc.NewClient(cfg.grpcAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if err != nil {
+			logger.Error("grpc dial failed", "addr", cfg.grpcAddr, "err", err)
+			os.Exit(1)
+		}
+		defer conn.Close()
+		gate := newTokenGate(userpb.NewUserServiceClient(conn), authedUser.ID, logger)
+		runner.WithGate(gate)
+		logger.Info("token gate enabled", "addr", cfg.grpcAddr, "user_id", authedUser.ID)
+	}
+
 	scheduleAutoCancels(cfg.cancelList, cfg.cancelAfter, runner, logger)
 
 	if cfg.repl {
@@ -189,6 +209,8 @@ type config struct {
 	storePath     string
 	storage       string
 
+	grpcAddr string
+
 	paths []string
 }
 
@@ -210,6 +232,7 @@ func parseFlags() config {
 	name := flag.String("name", "", "user name (register only)")
 	storePath := flag.String("store-path", ".data/users.json", "path to the persistent user store (jsonfile)")
 	storage := flag.String("storage", "jsonfile", "storage strategy: memory or jsonfile")
+	grpcAddr := flag.String("grpc-addr", "", "gRPC user-service address (e.g. :9090). Empty disables the token gate.")
 
 	flag.Parse()
 
@@ -244,6 +267,7 @@ func parseFlags() config {
 		name:          *name,
 		storePath:     *storePath,
 		storage:       *storage,
+		grpcAddr:      *grpcAddr,
 		paths:         flag.Args(),
 	}
 }

@@ -1,6 +1,6 @@
-# goLearn — Day 1 + Day 2 + Day 3: User Service + Concurrent CSV Ingestion + REST API
+# goLearn — Day 1 + Day 2 + Day 3 + Day 4: User Service + Concurrent CSV Ingestion + REST API + gRPC
 
-Three layered exercises in one repo:
+Four layered exercises in one repo:
 
 - **Day 1**: a user service with a Strategy-pattern repository
   (memory / jsonfile / postgres-stub), service layer, and gRPC-style
@@ -16,6 +16,13 @@ Three layered exercises in one repo:
   the server interface and types; a hand-written handler implements
   the interface against `user.Service`; request validation is
   enforced by middleware before handlers run.
+- **Day 4**: a real gRPC channel between the two cooperating services.
+  `proto/user/v1/user.proto` is the contract; `protoc` + `protoc-gen-go`
+  + `protoc-gen-go-grpc` produce the server interface, types, and a
+  typed client. The CSV processor (`cmd/ingest`) calls
+  `UserService.TakeTokens` before each file and `ReturnTokens` if a
+  run partial-fails, enforcing a per-user token-bucket quota
+  (configurable via `config/tokens.yaml`).
 
 The CSV ingester (`cmd/ingest`) is gated behind email + password
 auth against the day-1 user store. The REST API (`cmd/api`) is
@@ -37,6 +44,11 @@ chain · functional options.
 (std-http-server target) · request validation via the kin-openapi
 middleware · `//go:generate` workflow · tool-dependency pinning via
 build-tag-gated `tools/tools.go`.
+
+**Day 4**: Protocol Buffers · `protoc` + `protoc-gen-go` +
+`protoc-gen-go-grpc` · gRPC unary RPCs · token-bucket rate limiting
+(lazy refill) · gRPC interceptors · YAML config loading · `bufconn`
+in-process testing.
 
 ## Layout
 
@@ -532,6 +544,169 @@ The `//go:generate` directive lives at
 `internal/transport/httpapi/gen/gen.go`. Tool dependency is pinned in
 `tools/tools.go` under the `tools` build tag so the codegen tool
 never ends up in any production binary.
+
+---
+
+## Day 4 — gRPC + token-bucket rate limiting
+
+The same `cmd/api` binary now also serves a gRPC `UserService` on a
+separate port (`-grpc-addr`, default `:9090`). The CSV processor
+(`cmd/ingest`) speaks gRPC to enforce per-user token quotas: every
+file is pre-charged for its row count, and any unconsumed slack is
+refunded after the run finishes.
+
+### Workflow
+
+```
+proto/user/v1/user.proto                ← you edit this (the contract)
+       │
+       ▼ go generate ./...              ← protoc + Go plugins
+proto/gen/userpb/                       ← deterministic, checked in
+  ├── user.pb.go                        ← message types
+  └── user_grpc.pb.go                   ← server iface + typed client
+       │
+       ▼ implements                       ↗ uses
+internal/transport/grpc/server.go        cmd/grpc-demo + cmd/ingest
+   (UserServiceServer impl)              (UserServiceClient consumers)
+       │
+       ▼ wired by
+cmd/api/grpc.go                         ← starts gRPC listener on :9090
+```
+
+### Install protoc (one-time, host-level)
+
+`protoc` is a C++ binary, not a Go tool. Install it via your OS
+package manager:
+
+```bash
+brew install protobuf            # macOS
+apt-get install protobuf-compiler # Debian/Ubuntu
+```
+
+The Go-side codegen plugins (`protoc-gen-go`, `protoc-gen-go-grpc`)
+are pinned in [tools/tools.go](tools/tools.go) and installed with:
+
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+```
+
+After editing `user.proto`:
+
+```bash
+go generate ./...
+```
+
+### gRPC contract
+
+[proto/user/v1/user.proto](proto/user/v1/user.proto) defines five
+unary RPCs:
+
+| RPC | Purpose | Used by |
+|---|---|---|
+| `GetTokens(user_id)` | Read current bucket state without consuming | `cmd/grpc-demo`, monitoring |
+| `TakeTokens(user_id, count)` | Atomically reserve `count` tokens | `cmd/ingest` per-file pre-flight |
+| `ReturnTokens(user_id, count)` | Refund tokens (capped at capacity) | `cmd/ingest` post-file settle |
+| `GetUser(id)` | Fetch a user by ID | `cmd/grpc-demo`, internal lookups |
+| `ListUsers(limit, offset)` | Paginated user list | `cmd/grpc-demo` |
+
+The CRUD RPCs mirror the REST API as demo material. In a real
+product split, REST stays public and gRPC stays internal — see
+[docs/grpc-vs-rest.md](docs/grpc-vs-rest.md).
+
+### Token bucket
+
+Per-user bucket with **lazy refill** — no background goroutine, no
+ticker. Every Take/Return/Available call recomputes the balance from
+elapsed time × refill rate. Defaults from
+[config/tokens.yaml](config/tokens.yaml):
+
+```yaml
+capacity: 20000        # max tokens per user
+rate_per_min: 10000    # refill rate (tokens / minute)
+```
+
+Override via env vars without editing the file or rebuilding:
+
+```bash
+TOKENS_CAPACITY=50000 TOKENS_RATE_PER_MIN=5000 go run ./cmd/api
+```
+
+The implementation lives in [internal/tokens/](internal/tokens/):
+`bucket.go` (per-user `Bucket` with `Take` / `Return` / `Available`),
+`store.go` (lazy-create per-user map), `config.go` (YAML loader +
+env overrides). Tested under `-race` for atomicity (100 goroutines
+competing for 20 grants — exactly 20 win).
+
+### Run the gRPC server alongside REST
+
+```bash
+# Both listeners come up in the same process.
+go run ./cmd/api -addr :8080 -grpc-addr :9090 \
+  -tokens-config config/tokens.yaml
+```
+
+Disable gRPC with `-grpc-addr ""`.
+
+### Demo client (`cmd/grpc-demo`)
+
+```bash
+# Fetch token state.
+go run ./cmd/grpc-demo -addr :9090 -user u-7c0a5b6d3f1e9a4b2d8c4f1e
+
+# CRUD via gRPC.
+go run ./cmd/grpc-demo -addr :9090 -list
+go run ./cmd/grpc-demo -addr :9090 -get u-7c0a5b6d3f1e9a4b2d8c4f1e
+
+# Manual token operations.
+go run ./cmd/grpc-demo -addr :9090 -take   -user <id> -count 500
+go run ./cmd/grpc-demo -addr :9090 -return -user <id> -count 200
+```
+
+### Token-gated CSV ingest
+
+`cmd/ingest` picks up a new flag — `-grpc-addr` — that, when set,
+turns on the token gate:
+
+```bash
+# Register a user, then run ingest with the gate enabled.
+go run ./cmd/api -addr :8080 -grpc-addr :9090 &
+curl -s -XPOST localhost:8080/users -H 'Content-Type: application/json' \
+  -d '{"name":"Alice","email":"alice@example.com","password":"secret123"}'
+
+go run ./cmd/ingest -workers 8 -repl=false \
+  -email alice@example.com -password secret123 \
+  -grpc-addr :9090 \
+  data/
+```
+
+**What happens per file**: ingest counts data rows with `bufio.Scanner`
+(O(n), ~ms), calls `TakeTokens(user_id, rows)`, processes the file,
+and finally calls `ReturnTokens(user_id, rows − handled)` if any rows
+didn't finish as `OutcomeOK`/`OutcomeDedup`. If the bucket can't
+cover the file, `tokens denied` is logged and the file is skipped.
+
+### Verification
+
+```bash
+go vet ./... && go build ./... && go test -race ./...
+
+# Live smoke (requires the api server running on :9090):
+go run ./cmd/grpc-demo -addr :9090 -user <id>
+# expect: available=20000 capacity=20000
+
+go run ./cmd/ingest -email <email> -password <pwd> \
+  -grpc-addr :9090 -repl=false -work-min 1ms -work-max 5ms data/
+# expect: 4 "tokens reserved" log lines + ok=898 dedup=102
+
+go run ./cmd/grpc-demo -addr :9090 -user <id>
+# expect: available ~= 19000 (1000 consumed) + tiny refill
+```
+
+The full token semantics — including the insufficient-tokens path
+(skip file) and the refund-on-partial-failure path — are covered in
+[internal/transport/grpc/server_test.go](internal/transport/grpc/server_test.go)
+using `bufconn` for in-process gRPC.
 
 ---
 
