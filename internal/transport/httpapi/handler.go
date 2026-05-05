@@ -8,7 +8,9 @@ import (
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi/gen"
+
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
 
@@ -68,7 +70,7 @@ func paginationParams(params gen.ListUsersParams) (limit, offset int) {
 	return
 }
 
-func pageSlice(users []user.User, limit, offset int) []user.User {
+func pageSlice(users []model.User, limit, offset int) []model.User {
 	if offset >= len(users) {
 		return nil
 	}
@@ -82,7 +84,7 @@ func pageSlice(users []user.User, limit, offset int) []user.User {
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req gen.CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, r, h.logger, &user.AppError{Code: user.CodeInvalidUser, Message: "invalid request body: " + err.Error()})
+		writeError(w, r, h.logger, &model.AppError{Code: model.CodeInvalidUser, Message: "invalid request body: " + err.Error()})
 		return
 	}
 	created, err := h.svc.Register(r.Context(), req.Name, string(req.Email), req.Password)
@@ -106,7 +108,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request, id gen.UserID)
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request, id gen.UserID) {
 	var req gen.UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, r, h.logger, &user.AppError{Code: user.CodeInvalidUser, Message: "invalid request body: " + err.Error()})
+		writeError(w, r, h.logger, &model.AppError{Code: model.CodeInvalidUser, Message: "invalid request body: " + err.Error()})
 		return
 	}
 	var name, email string
@@ -133,7 +135,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request, id gen.User
 }
 
 // toAPIUser strips PasswordHash and converts to the spec's User shape.
-func toAPIUser(u user.User) gen.User {
+func toAPIUser(u model.User) gen.User {
 	return gen.User{
 		Id:    u.ID,
 		Name:  u.Name,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
+
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
 
@@ -23,7 +25,7 @@ type AddUserResponse struct {
 }
 
 type ListUsersResponse struct {
-	Users []user.User
+	Users []model.User
 }
 
 type Empty struct{}

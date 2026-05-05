@@ -6,13 +6,15 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
+
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
 
 // UserRepo is an in-memory implementation of user.Repository
 type UserRepo struct {
 	mu     sync.RWMutex
-	users  map[string]user.User
+	users  map[string]model.User
 	emails map[string]string
 	logger *slog.Logger
 }
@@ -20,14 +22,14 @@ type UserRepo struct {
 // NewUserRepo creates a new in-memory user repository
 func NewUserRepo(logger *slog.Logger) *UserRepo {
 	return &UserRepo{
-		users:  make(map[string]user.User),
+		users:  make(map[string]model.User),
 		emails: make(map[string]string),
 		logger: logger,
 	}
 }
 
 // Add adds a user to the in-memory store
-func (r *UserRepo) Add(ctx context.Context, u user.User) error {
+func (r *UserRepo) Add(ctx context.Context, u model.User) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -36,10 +38,10 @@ func (r *UserRepo) Add(ctx context.Context, u user.User) error {
 
 	emailKey := strings.ToLower(strings.TrimSpace(u.Email))
 	if emailKey == "" {
-		return user.ErrInvalidUser
+		return model.ErrInvalidUser
 	}
 	if _, found := r.emails[emailKey]; found {
-		return user.ErrDuplicateUser
+		return model.ErrDuplicateUser
 	}
 
 	r.users[u.ID] = u
@@ -49,25 +51,25 @@ func (r *UserRepo) Add(ctx context.Context, u user.User) error {
 }
 
 // Get returns the user with the given ID, or ErrUserNotFound.
-func (r *UserRepo) Get(ctx context.Context, id string) (user.User, error) {
+func (r *UserRepo) Get(ctx context.Context, id string) (model.User, error) {
 	if err := ctx.Err(); err != nil {
-		return user.User{}, err
+		return model.User{}, err
 	}
 	if strings.TrimSpace(id) == "" {
-		return user.User{}, user.ErrInvalidUser
+		return model.User{}, model.ErrInvalidUser
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	u, found := r.users[id]
 	if !found {
-		return user.User{}, user.ErrUserNotFound
+		return model.User{}, model.ErrUserNotFound
 	}
 	return u, nil
 }
 
 // Update overwrites the user record at u.ID. Detects email collision
 // against another user before mutating.
-func (r *UserRepo) Update(ctx context.Context, u user.User) error {
+func (r *UserRepo) Update(ctx context.Context, u model.User) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -76,16 +78,16 @@ func (r *UserRepo) Update(ctx context.Context, u user.User) error {
 
 	prev, found := r.users[u.ID]
 	if !found {
-		return user.ErrUserNotFound
+		return model.ErrUserNotFound
 	}
 	newKey := strings.ToLower(strings.TrimSpace(u.Email))
 	if newKey == "" {
-		return user.ErrInvalidUser
+		return model.ErrInvalidUser
 	}
 	prevKey := strings.ToLower(strings.TrimSpace(prev.Email))
 	if newKey != prevKey {
 		if _, taken := r.emails[newKey]; taken {
-			return user.ErrDuplicateUser
+			return model.ErrDuplicateUser
 		}
 		delete(r.emails, prevKey)
 		r.emails[newKey] = u.ID
@@ -100,32 +102,32 @@ func (r *UserRepo) Update(ctx context.Context, u user.User) error {
 
 // GetByEmail returns the user with the given email (case-insensitive,
 // whitespace-insensitive lookup).
-func (r *UserRepo) GetByEmail(ctx context.Context, email string) (user.User, error) {
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (model.User, error) {
 	if err := ctx.Err(); err != nil {
-		return user.User{}, err
+		return model.User{}, err
 	}
 	emailKey := strings.ToLower(strings.TrimSpace(email))
 	if emailKey == "" {
-		return user.User{}, user.ErrInvalidEmail
+		return model.User{}, model.ErrInvalidEmail
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	id, found := r.emails[emailKey]
 	if !found {
-		return user.User{}, user.ErrUserNotFound
+		return model.User{}, model.ErrUserNotFound
 	}
 	return r.users[id], nil
 }
 
 // List returns all users from the in-memory store
-func (r *UserRepo) List(ctx context.Context) ([]user.User, error) {
+func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	users := make([]user.User, 0, len(r.users))
+	users := make([]model.User, 0, len(r.users))
 	for _, user := range r.users {
 		users = append(users, user)
 	}
@@ -142,7 +144,7 @@ func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 
 	u, found := r.users[userID]
 	if !found {
-		return user.ErrUserNotFound
+		return model.ErrUserNotFound
 	}
 
 	emailKey := strings.ToLower(strings.TrimSpace(u.Email))

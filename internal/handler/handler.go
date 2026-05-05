@@ -7,7 +7,7 @@ package handler
 import (
 	"context"
 
-	"github.com/ashishsinghbhadoria/goLearn/internal/user"
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 )
 
 // Outcome is the terminal result of running a record through the chain.
@@ -36,7 +36,7 @@ func (o Outcome) String() string {
 }
 
 // Handler processes one record. The pipeline is composed via Middleware.
-type Handler func(ctx context.Context, file string, u user.User) Outcome
+type Handler func(ctx context.Context, file string, u model.User) Outcome
 
 // Middleware wraps a Handler with additional behavior.
 type Middleware func(Handler) Handler
@@ -54,7 +54,7 @@ func Chain(final Handler, mws ...Middleware) Handler {
 // Terminal is the no-op handler used as the base of the chain. It
 // returns OutcomeOK so middleware that only short-circuits on failure
 // (Dedup, CancelCheck) can rely on a default success.
-func Terminal(_ context.Context, _ string, _ user.User) Outcome {
+func Terminal(_ context.Context, _ string, _ model.User) Outcome {
 	return OutcomeOK
 }
 
@@ -62,9 +62,9 @@ func Terminal(_ context.Context, _ string, _ user.User) Outcome {
 // *user.DedupStore). Defining it here keeps the pipeline package
 // free of concrete imports.
 type Deduper interface {
-	AddIfNew(u user.User) bool
+	AddIfNew(u model.User) bool
 }
 
 // ProcessFunc is the per-record work function. It returns ctx.Err()
 // if cancelled mid-flight and nil on success.
-type ProcessFunc func(ctx context.Context, u user.User) error
+type ProcessFunc func(ctx context.Context, u model.User) error

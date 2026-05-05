@@ -6,15 +6,15 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/pool"
-	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
 
 // WithPerWorkerCount increments the per-worker counter for every job
 // that reaches a worker, regardless of outcome. Place this outermost.
 func WithPerWorkerCount(s *Stats) Middleware {
 	return func(next Handler) Handler {
-		return func(ctx context.Context, file string, u user.User) Outcome {
+		return func(ctx context.Context, file string, u model.User) Outcome {
 			s.IncWorker(pool.WorkerID(ctx))
 			return next(ctx, file, u)
 		}
@@ -28,7 +28,7 @@ func WithLogging(logger *slog.Logger, verbose bool) Middleware {
 		return func(next Handler) Handler { return next }
 	}
 	return func(next Handler) Handler {
-		return func(ctx context.Context, file string, u user.User) Outcome {
+		return func(ctx context.Context, file string, u model.User) Outcome {
 			start := time.Now()
 			out := next(ctx, file, u)
 			logger.Info("processed",
@@ -47,7 +47,7 @@ func WithLogging(logger *slog.Logger, verbose bool) Middleware {
 // short-circuit middleware so it sees the final outcome.
 func WithMetrics(s *Stats) Middleware {
 	return func(next Handler) Handler {
-		return func(ctx context.Context, file string, u user.User) Outcome {
+		return func(ctx context.Context, file string, u model.User) Outcome {
 			out := next(ctx, file, u)
 			switch out {
 			case OutcomeOK:
@@ -68,7 +68,7 @@ func WithMetrics(s *Stats) Middleware {
 // done by the time we reach this layer.
 func WithCancelCheck() Middleware {
 	return func(next Handler) Handler {
-		return func(ctx context.Context, file string, u user.User) Outcome {
+		return func(ctx context.Context, file string, u model.User) Outcome {
 			if ctx.Err() != nil {
 				return OutcomeCancelled
 			}
@@ -80,7 +80,7 @@ func WithCancelCheck() Middleware {
 // WithDedup short-circuits the chain if the user has been seen before.
 func WithDedup(d Deduper) Middleware {
 	return func(next Handler) Handler {
-		return func(ctx context.Context, file string, u user.User) Outcome {
+		return func(ctx context.Context, file string, u model.User) Outcome {
 			if !d.AddIfNew(u) {
 				return OutcomeDedup
 			}
@@ -93,7 +93,7 @@ func WithDedup(d Deduper) Middleware {
 // reported as OutcomeCancelled; any other error becomes OutcomeError.
 func WithProcess(fn ProcessFunc) Middleware {
 	return func(next Handler) Handler {
-		return func(ctx context.Context, file string, u user.User) Outcome {
+		return func(ctx context.Context, file string, u model.User) Outcome {
 			if err := fn(ctx, u); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return OutcomeCancelled

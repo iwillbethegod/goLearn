@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/storage/memory"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi/gen"
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
@@ -37,7 +38,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *user.Service) {
 	return srv, svc
 }
 
-func mustRegister(t *testing.T, svc *user.Service, name, email, password string) user.User {
+func mustRegister(t *testing.T, svc *user.Service, name, email, password string) model.User {
 	t.Helper()
 	u, err := svc.Register(context.Background(), name, email, password)
 	if err != nil {

@@ -10,14 +10,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ashishsinghbhadoria/goLearn/internal/user"
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 )
 
-// Record carries either a parsed user or a parse error from a Processor.
-type Record struct {
-	User user.User
-	Err  error
-}
+// Record is re-exported as a type alias so existing callers can keep
+// referring to processor.Record. The canonical definition now lives
+// in the model package alongside other data-bearing types.
+type Record = model.Record
 
 // Processor reads one source file and emits Records on a channel.
 // The channel is closed when the file is exhausted or ctx is done.

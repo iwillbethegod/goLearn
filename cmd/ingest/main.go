@@ -15,6 +15,7 @@ import (
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
 	"github.com/ashishsinghbhadoria/goLearn/internal/handler"
 	"github.com/ashishsinghbhadoria/goLearn/internal/ingest"
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/pool"
 	"github.com/ashishsinghbhadoria/goLearn/internal/processor"
 	"github.com/ashishsinghbhadoria/goLearn/internal/repl"
@@ -71,7 +72,7 @@ func runDeleteProfile(svc *user.Service, cfg config) {
 		os.Exit(1)
 	}
 	if err := svc.DeleteByEmail(context.Background(), cfg.email, cfg.password); err != nil {
-		if errors.Is(err, user.ErrInvalidCredential) {
+		if errors.Is(err, model.ErrInvalidCredential) {
 			fmt.Fprintln(os.Stderr, "delete failed: invalid email or password")
 		} else {
 			fmt.Fprintf(os.Stderr, "delete failed: %v\n", err)
@@ -94,7 +95,7 @@ func runIngest(cfg config, logger *slog.Logger, svc *user.Service) {
 
 	authedUser, err := svc.Login(context.Background(), cfg.email, cfg.password)
 	if err != nil {
-		if errors.Is(err, user.ErrInvalidCredential) {
+		if errors.Is(err, model.ErrInvalidCredential) {
 			fmt.Fprintln(os.Stderr, "login failed: invalid email or password")
 		} else {
 			fmt.Fprintf(os.Stderr, "login failed: %v\n", err)

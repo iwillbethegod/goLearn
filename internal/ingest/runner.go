@@ -9,17 +9,15 @@ import (
 	"time"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/handler"
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/pool"
 	"github.com/ashishsinghbhadoria/goLearn/internal/processor"
 )
 
-// FileStats summarises one file's lifecycle. Records is the count
-// emitted by the Processor (parse errors excluded).
-type FileStats struct {
-	Path     string
-	Records  int
-	Duration time.Duration
-}
+// FileStats is re-exported from the model package so existing
+// callers can keep saying `ingest.FileStats`. The canonical type
+// lives there alongside other data-bearing structs.
+type FileStats = model.FileStats
 
 // Runner drives multiple files through one Processor and one Pool in
 // parallel. It applies the same handler chain to every record and

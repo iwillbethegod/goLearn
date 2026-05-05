@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
+
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
 
@@ -18,23 +20,23 @@ func NewUserRepo(db *sql.DB) *UserRepo {
 	return &UserRepo{db: db}
 }
 
-func (r *UserRepo) Add(ctx context.Context, u user.User) error {
+func (r *UserRepo) Add(ctx context.Context, u model.User) error {
 	return ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) Get(ctx context.Context, id string) (user.User, error) {
-	return user.User{}, ErrPostgresNotImplemented
+func (r *UserRepo) Get(ctx context.Context, id string) (model.User, error) {
+	return model.User{}, ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) GetByEmail(ctx context.Context, email string) (user.User, error) {
-	return user.User{}, ErrPostgresNotImplemented
+func (r *UserRepo) GetByEmail(ctx context.Context, email string) (model.User, error) {
+	return model.User{}, ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) Update(ctx context.Context, u user.User) error {
+func (r *UserRepo) Update(ctx context.Context, u model.User) error {
 	return ErrPostgresNotImplemented
 }
 
-func (r *UserRepo) List(ctx context.Context) ([]user.User, error) {
+func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
 	return nil, ErrPostgresNotImplemented
 }
 

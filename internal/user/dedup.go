@@ -3,6 +3,8 @@ package user
 import (
 	"strings"
 	"sync"
+
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 )
 
 // DedupStore is a concurrency-safe transient set of user records keyed
@@ -15,15 +17,15 @@ import (
 // and "alice@example.com " hash to the same key.
 type DedupStore struct {
 	mu    sync.Mutex
-	users map[string]User
+	users map[string]model.User
 }
 
 func NewDedupStore() *DedupStore {
-	return &DedupStore{users: make(map[string]User)}
+	return &DedupStore{users: make(map[string]model.User)}
 }
 
 // AddIfNew returns true when the email had not been seen before.
-func (s *DedupStore) AddIfNew(u User) bool {
+func (s *DedupStore) AddIfNew(u model.User) bool {
 	key := normaliseEmail(u.Email)
 	if key == "" {
 		return false

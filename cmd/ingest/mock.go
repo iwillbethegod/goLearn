@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/handler"
-	"github.com/ashishsinghbhadoria/goLearn/internal/user"
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 )
 
 // makeMockProcessRow returns a ProcessFunc that sleeps for a uniform
@@ -21,7 +21,7 @@ func makeMockProcessRow(minD, maxD time.Duration) handler.ProcessFunc {
 		maxD = minD + time.Microsecond
 	}
 	span := int64(maxD - minD)
-	return func(ctx context.Context, _ user.User) error {
+	return func(ctx context.Context, _ model.User) error {
 		d := minD + time.Duration(rand.Int64N(span))
 		t := time.NewTimer(d)
 		defer t.Stop()

@@ -8,32 +8,32 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi/gen"
-	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
 
 // statusFor maps a domain error to (status code, machine-readable code,
 // public message). Storage errors are deliberately scrubbed so callers
 // don't get internal detail; the original is logged separately.
 func statusFor(err error) (int, gen.ErrorCode, string) {
-	var appErr *user.AppError
+	var appErr *model.AppError
 	if !errors.As(err, &appErr) {
 		return http.StatusInternalServerError, gen.InternalError, "internal error"
 	}
 	switch appErr.Code {
-	case user.CodeDuplicateUser:
+	case model.CodeDuplicateUser:
 		return http.StatusConflict, gen.DuplicateUser, appErr.Message
-	case user.CodeInvalidUser:
+	case model.CodeInvalidUser:
 		return http.StatusBadRequest, gen.InvalidUser, appErr.Message
-	case user.CodeInvalidEmail:
+	case model.CodeInvalidEmail:
 		return http.StatusBadRequest, gen.InvalidEmail, appErr.Message
-	case user.CodeInvalidPassword:
+	case model.CodeInvalidPassword:
 		return http.StatusBadRequest, gen.InvalidPassword, appErr.Message
-	case user.CodeUserNotFound:
+	case model.CodeUserNotFound:
 		return http.StatusNotFound, gen.UserNotFound, appErr.Message
-	case user.CodeInvalidCredential:
+	case model.CodeInvalidCredential:
 		return http.StatusUnauthorized, gen.InvalidUser, appErr.Message
-	case user.CodeStorage:
+	case model.CodeStorage:
 		return http.StatusInternalServerError, gen.StorageError, "storage error"
 	default:
 		return http.StatusInternalServerError, gen.InternalError, "internal error"

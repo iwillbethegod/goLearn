@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/pkg/metrics"
 )
 
@@ -60,20 +61,20 @@ func (s *Service) Logger() *slog.Logger {
 	return s.logger
 }
 
-func (s *Service) AddUser(ctx context.Context, name, email string) (User, error) {
+func (s *Service) AddUser(ctx context.Context, name, email string) (model.User, error) {
 	trimmedName := strings.TrimSpace(name)
 	trimmedEmail := strings.TrimSpace(email)
 	if trimmedName == "" || trimmedEmail == "" {
-		s.logger.Error("invalid add user request", "error", ErrInvalidUser)
-		return User{}, ErrInvalidUser
+		s.logger.Error("invalid add user request", "error", model.ErrInvalidUser)
+		return model.User{}, model.ErrInvalidUser
 	}
 
-	if !IsValidEmail(trimmedEmail) {
-		s.logger.Error(invalidEmailFmtMsg, "error", ErrInvalidEmail, "email", trimmedEmail)
-		return User{}, ErrInvalidEmail
+	if !model.IsValidEmail(trimmedEmail) {
+		s.logger.Error(invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
+		return model.User{}, model.ErrInvalidEmail
 	}
 
-	newUser := User{
+	newUser := model.User{
 		ID:    s.generateID(),
 		Name:  trimmedName,
 		Email: trimmedEmail,
@@ -81,7 +82,7 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (User, error)
 
 	if err := s.repo.Add(ctx, newUser); err != nil {
 		s.logger.Error("repository failed to add user", "error", err, "user_id", newUser.ID)
-		return User{}, err
+		return model.User{}, err
 	}
 
 	s.metrics.IncUserAdded()
@@ -89,7 +90,7 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (User, error)
 	return newUser, nil
 }
 
-func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
+func (s *Service) ListUsers(ctx context.Context) ([]model.User, error) {
 	users, err := s.repo.List(ctx)
 	if err != nil {
 		s.logger.Error("repository failed to list users", "error", err)
@@ -101,8 +102,8 @@ func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
 func (s *Service) RemoveUser(ctx context.Context, userID string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		s.logger.Error("invalid remove user request", "error", ErrInvalidUser)
-		return ErrInvalidUser
+		s.logger.Error("invalid remove user request", "error", model.ErrInvalidUser)
+		return model.ErrInvalidUser
 	}
 
 	if err := s.repo.Remove(ctx, userID); err != nil {
@@ -130,15 +131,15 @@ func (s *Service) generateID() string {
 }
 
 // GetUser returns the user with the given ID.
-func (s *Service) GetUser(ctx context.Context, id string) (User, error) {
+func (s *Service) GetUser(ctx context.Context, id string) (model.User, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return User{}, ErrInvalidUser
+		return model.User{}, model.ErrInvalidUser
 	}
 	u, err := s.repo.Get(ctx, id)
 	if err != nil {
 		s.logger.Debug("repository get failed", "error", err, "user_id", id)
-		return User{}, err
+		return model.User{}, err
 	}
 	return u, nil
 }
@@ -147,14 +148,14 @@ func (s *Service) GetUser(ctx context.Context, id string) (User, error) {
 // An empty name or email leaves that field unchanged. Email changes
 // are validated for format and checked for collision against other
 // users by the repository.
-func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (User, error) {
+func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (model.User, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return User{}, ErrInvalidUser
+		return model.User{}, model.ErrInvalidUser
 	}
 	current, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return User{}, err
+		return model.User{}, err
 	}
 	trimmedName := strings.TrimSpace(name)
 	trimmedEmail := strings.TrimSpace(email)
@@ -162,15 +163,15 @@ func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (User,
 		current.Name = trimmedName
 	}
 	if trimmedEmail != "" {
-		if !IsValidEmail(trimmedEmail) {
-			s.logger.Error(invalidEmailFmtMsg, "error", ErrInvalidEmail, "email", trimmedEmail)
-			return User{}, ErrInvalidEmail
+		if !model.IsValidEmail(trimmedEmail) {
+			s.logger.Error(invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
+			return model.User{}, model.ErrInvalidEmail
 		}
 		current.Email = trimmedEmail
 	}
 	if err := s.repo.Update(ctx, current); err != nil {
 		s.logger.Error("repository failed to update user", "error", err, "user_id", id)
-		return User{}, err
+		return model.User{}, err
 	}
 	s.logger.Info("user updated", "user_id", id)
 	return current, nil
@@ -178,29 +179,29 @@ func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (User,
 
 // Register creates a new user with a bcrypt-hashed password and
 // persists them via the repository.
-func (s *Service) Register(ctx context.Context, name, email, password string) (User, error) {
+func (s *Service) Register(ctx context.Context, name, email, password string) (model.User, error) {
 	trimmedName := strings.TrimSpace(name)
 	trimmedEmail := strings.TrimSpace(email)
 	if trimmedName == "" || trimmedEmail == "" {
-		s.logger.Error("invalid register request", "error", ErrInvalidUser)
-		return User{}, ErrInvalidUser
+		s.logger.Error("invalid register request", "error", model.ErrInvalidUser)
+		return model.User{}, model.ErrInvalidUser
 	}
-	if !IsValidEmail(trimmedEmail) {
-		s.logger.Error(invalidEmailFmtMsg, "error", ErrInvalidEmail, "email", trimmedEmail)
-		return User{}, ErrInvalidEmail
+	if !model.IsValidEmail(trimmedEmail) {
+		s.logger.Error(invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
+		return model.User{}, model.ErrInvalidEmail
 	}
 	if len(password) < MinPasswordLen {
 		s.logger.Error("password too short", "min", MinPasswordLen)
-		return User{}, ErrInvalidPassword
+		return model.User{}, model.ErrInvalidPassword
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		s.logger.Error("hash password failed", "error", err)
-		return User{}, NewStorageError(err)
+		return model.User{}, model.NewStorageError(err)
 	}
 
-	newUser := User{
+	newUser := model.User{
 		ID:           s.generateID(),
 		Name:         trimmedName,
 		Email:        trimmedEmail,
@@ -209,7 +210,7 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (U
 
 	if err := s.repo.Add(ctx, newUser); err != nil {
 		s.logger.Error("repository failed to add user", "error", err, "user_id", newUser.ID)
-		return User{}, err
+		return model.User{}, err
 	}
 
 	s.metrics.IncUserAdded()
@@ -219,39 +220,40 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (U
 
 // Login looks up the user by email and verifies the password against
 // the stored bcrypt hash. Wrong email and wrong password both return
-// ErrInvalidCredential to avoid leaking which one was wrong.
+// model.ErrInvalidCredential to avoid leaking which one was wrong.
 //
 // The not-found branch deliberately runs a bcrypt compare against a
 // dummy hash so the response time is statistically uniform with the
 // real-user / wrong-password branch — closes a timing side-channel.
-func (s *Service) Login(ctx context.Context, email, password string) (User, error) {
+func (s *Service) Login(ctx context.Context, email, password string) (model.User, error) {
 	u, err := s.repo.GetByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrInvalidEmail) {
+		if errors.Is(err, model.ErrUserNotFound) || errors.Is(err, model.ErrInvalidEmail) {
 			// Constant-time compensation: keep wall time comparable to
 			// the real-user path so an attacker can't distinguish.
 			_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 			s.logger.Warn(loginFailedMsg, "reason", "no such user", "email", email)
-			return User{}, ErrInvalidCredential
+			return model.User{}, model.ErrInvalidCredential
 		}
 		s.logger.Error("repository lookup failed", "error", err)
-		return User{}, err
+		return model.User{}, err
 	}
 	if u.PasswordHash == "" {
 		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 		s.logger.Warn(loginFailedMsg, "reason", "user has no password set", "email", email)
-		return User{}, ErrInvalidCredential
+		return model.User{}, model.ErrInvalidCredential
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		s.logger.Warn(loginFailedMsg, "reason", "bad password", "email", email)
-		return User{}, ErrInvalidCredential
+		return model.User{}, model.ErrInvalidCredential
 	}
 	s.logger.Info("login ok", "user_id", u.ID, "email", u.Email)
 	return u, nil
 }
 
 // DeleteByEmail authenticates the email/password pair and then
-// removes the user. Returns ErrInvalidCredential on any auth failure.
+// removes the user. Returns model.ErrInvalidCredential on any auth
+// failure.
 func (s *Service) DeleteByEmail(ctx context.Context, email, password string) error {
 	u, err := s.Login(ctx, email, password)
 	if err != nil {

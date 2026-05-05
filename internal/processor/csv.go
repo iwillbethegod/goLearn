@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ashishsinghbhadoria/goLearn/internal/user"
+	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 )
 
 // CSVProcessor reads files with header `id,name,email`. Header column
@@ -97,7 +97,7 @@ func nextRow(ctx context.Context, r *csv.Reader, out chan<- Record) bool {
 	if err != nil {
 		return sendRecord(ctx, out, Record{Err: err})
 	}
-	return sendRecord(ctx, out, Record{User: user.User{ID: row[0], Name: row[1], Email: row[2]}})
+	return sendRecord(ctx, out, Record{User: model.User{ID: row[0], Name: row[1], Email: row[2]}})
 }
 
 func validateHeader(header []string) error {
