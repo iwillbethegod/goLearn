@@ -38,6 +38,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
+	"github.com/ashishsinghbhadoria/goLearn/internal/storage/postgres"
 	"github.com/ashishsinghbhadoria/goLearn/internal/tokens"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi"
 	"github.com/ashishsinghbhadoria/goLearn/internal/transport/httpapi/gen"
@@ -48,8 +49,11 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	grpcAddr := flag.String("grpc-addr", ":9090", "gRPC listen address (empty disables gRPC)")
-	storePath := flag.String("store-path", ".data/users.json", "user store path")
-	storage := flag.String("storage", "jsonfile", "storage strategy: memory or jsonfile")
+	storePath := flag.String("store-path", ".data/users.json", "user store path (jsonfile only)")
+	storage := flag.String("storage", "jsonfile", "storage strategy: memory | jsonfile | postgres")
+	dbDSN := flag.String("db-dsn", os.Getenv("DATABASE_URL"), "Postgres DSN; defaults to $DATABASE_URL")
+	migrate := flag.Bool("migrate", false, "apply DB migrations from -migrations-path before serving (postgres only)")
+	migrationsPath := flag.String("migrations-path", "file://./db/migrations", "migrate source URL (postgres only)")
 	tokensCfgPath := flag.String("tokens-config", "config/tokens.yaml", "token bucket YAML config (env vars override)")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 5*time.Second, "graceful shutdown grace period")
 	readTimeout := flag.Duration("read-timeout", 10*time.Second, "max request read time including body")
@@ -59,9 +63,22 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	rootCtx, rootCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer rootCancel()
+
+	if *storage == string(app.TypePostgres) && *migrate {
+		if err := postgres.Migrate(*migrationsPath, *dbDSN); err != nil {
+			logger.Error("db migrate failed", "err", err)
+			os.Exit(1)
+		}
+		logger.Info("db migrated", "source", *migrationsPath)
+	}
+
 	repo, err := app.NewRepository(app.RepositoryConfig{
 		Type:     app.RepositoryType(*storage),
 		JSONPath: *storePath,
+		DSN:      *dbDSN,
+		Ctx:      rootCtx,
 		Logger:   logger,
 	})
 	if err != nil {
@@ -112,16 +129,13 @@ func main() {
 		MaxHeaderBytes:    1 << 14, // 16 KiB
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
 	go func() {
 		logger.Info("api listening",
 			"addr", *addr, "storage", *storage, "store_path", *storePath,
 		)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("listen failed", "err", err)
-			cancel()
+			rootCancel()
 		}
 	}()
 
@@ -134,7 +148,7 @@ func main() {
 		}
 	}
 
-	<-ctx.Done()
+	<-rootCtx.Done()
 	logger.Info("shutting down")
 	if grpcSrv != nil {
 		grpcSrv.GracefulStop()

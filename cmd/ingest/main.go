@@ -35,6 +35,8 @@ func main() {
 	repo, err := app.NewRepository(app.RepositoryConfig{
 		Type:     app.RepositoryType(cfg.storage),
 		JSONPath: cfg.storePath,
+		DSN:      cfg.dbDSN,
+		Ctx:      context.Background(),
 		Logger:   logger,
 	})
 	if err != nil {
@@ -233,6 +235,7 @@ type config struct {
 	name          string
 	storePath     string
 	storage       string
+	dbDSN         string
 
 	grpcAddr string
 
@@ -257,7 +260,8 @@ func parseFlags() config {
 	password := flag.String("password", "", "user password (or set $INGEST_PASSWORD)")
 	name := flag.String("name", "", "user name (register only)")
 	storePath := flag.String("store-path", ".data/users.json", "path to the persistent user store (jsonfile)")
-	storage := flag.String("storage", "jsonfile", "storage strategy: memory or jsonfile")
+	storage := flag.String("storage", "jsonfile", "storage strategy: memory | jsonfile | postgres")
+	dbDSN := flag.String("db-dsn", os.Getenv("DATABASE_URL"), "Postgres DSN; defaults to $DATABASE_URL (postgres only)")
 	grpcAddr := flag.String("grpc-addr", "", "gRPC user-service address (e.g. :9090). Empty disables the token gate.")
 
 	flag.Parse()
@@ -294,6 +298,7 @@ func parseFlags() config {
 		name:          *name,
 		storePath:     *storePath,
 		storage:       *storage,
+		dbDSN:         *dbDSN,
 		grpcAddr:      *grpcAddr,
 		paths:         flag.Args(),
 	}

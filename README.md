@@ -1,9 +1,12 @@
-# goLearn — 4-day Go bootcamp project
+# goLearn — 5-day Go bootcamp project
 
-A user-management service that grew across four days from a Day-1 CLI
-into a Day-4 service mesh. A user registered through one entrypoint
-becomes the auth subject for every other workflow: REST CRUD,
-concurrent CSV ingestion, and a gRPC token-bucket coordinator.
+A user-management service that grew across five days from a Day-1 CLI
+into a Day-4 service mesh, and on Day 5 swapped its in-memory store
+for **PostgreSQL** behind the same `user.Repository` interface. A
+user registered through one entrypoint becomes the auth subject for
+every other workflow: REST CRUD, concurrent CSV ingestion, and a
+gRPC token-bucket coordinator — all backed by a transactional
+Postgres-persisted store.
 
 ## Cohesive flow
 
@@ -417,6 +420,108 @@ go run ./cmd/ingest -workers 8 -repl=false \
 
 ---
 
+## Day 5 — PostgreSQL Integration
+
+> **Brief.** Topics: pgx/v5 + pgxpool · sqlc for type-safe SQL code
+> generation · connection pooling · transactions · error mapping ·
+> configuration management. **Hands-on:** replace the in-memory repo
+> with PostgreSQL using pgxpool + sqlc.
+
+### Deliverables
+
+- [x] **DB schema migration file (golang-migrate)** —
+      [db/migrations/000001_init.up.sql](db/migrations/000001_init.up.sql)
+      + [`.down.sql`](db/migrations/000001_init.down.sql).
+      Versioned `up`/`down` pair, applied via `make migrate-up` or
+      via the in-process `postgres.Migrate(...)` helper.
+- [x] **sqlc.yaml + generated query code committed** —
+      [sqlc.yaml](sqlc.yaml) drives generation;
+      [internal/storage/postgres/pgdb/](internal/storage/postgres/pgdb/)
+      (`db.go`, `models.go`, `users.sql.go`) is the typed Go output.
+      `make sqlc-gen` re-runs after editing
+      [db/queries/users.sql](db/queries/users.sql).
+- [x] **Unique email constraint** — `CREATE UNIQUE INDEX
+      users_email_lower_idx ON users (lower(email))`. Closes the
+      "Email keys not normalised" gap noted in the prior README's
+      edge-case list — uppercase / lowercase / spaced variants of
+      the same address all collide at the DB layer.
+- [x] **Transactional user creation** — every `Repository.Add` opens
+      a `pgx.Tx`, runs `INSERT users` + `INSERT registration_log`,
+      and commits or rolls back atomically. Verified by
+      `TestAdd_DuplicateEmailRollsBackBoth` —  a duplicate-email
+      registration leaves zero rows in `registration_log` because
+      the failed transaction took the audit row down with it.
+- [x] **DB error properly mapped to API error** —
+      [internal/storage/postgres/user_repo.go](internal/storage/postgres/user_repo.go)
+      `mapErr`: `pgx.ErrNoRows` → `model.ErrUserNotFound`; SQLSTATE
+      `23505` → `model.ErrDuplicateUser`; SQLSTATE `23503` →
+      `model.ErrInvalidUser`; anything else → `model.NewStorageError`.
+      The REST + gRPC error mappers already understood those codes,
+      so the transport layer needed **zero changes**.
+- [x] **Docker-ready DB config** — [compose.yaml](compose.yaml)
+      brings up `postgres:16-alpine` with a healthcheck and a named
+      volume. `make compose-up` / `make compose-down`.
+- [x] **No hardcoded credentials** — DSN comes from `$DATABASE_URL`
+      with a `-db-dsn` flag override. `compose.yaml` reads
+      `${POSTGRES_USER}` / `${POSTGRES_PASSWORD}` from `.env`
+      ([.env.example](.env.example) is the template; real `.env` is
+      gitignored).
+
+### How it fits
+
+`internal/app/factory.go` gains a third case alongside `memory` and
+`jsonfile`. Every layer above it — `user.Service`, the REST handler,
+the gRPC handler, the day-2 ingest pipeline, the day-4 token gate,
+and all four cohesion tests — works **unchanged** against the
+postgres backend. The `cohesion_test.go` suite that exercises the
+REST + gRPC contract from day 4 now also serves as a parity check:
+behaviour identical regardless of which strategy is selected.
+
+### Run
+
+```bash
+# Toolchain.
+make install-tools                # sqlc + golang-migrate at pinned versions
+cp .env.example .env
+
+# Database up.
+make compose-up && make migrate-up
+
+# Day-1 CLI against postgres.
+go run ./cmd/ingest -storage postgres -register \
+  -name Alice -email alice@example.com -password secret123
+go run ./cmd/ingest -storage postgres -list
+
+# Day-3 + Day-4 service against postgres.
+go run ./cmd/api -storage postgres -migrate=true
+
+# Verify the unique-email rollback.
+curl -sS -XPOST localhost:8080/users -H 'Content-Type: application/json' \
+  -d '{"name":"A","email":"alice@example.com","password":"secret123"}'   # 201
+curl -sS -XPOST localhost:8080/users -H 'Content-Type: application/json' \
+  -d '{"name":"A2","email":"ALICE@EXAMPLE.COM","password":"secret123"}'  # 409 duplicate_user
+
+# Inspect the audit table.
+make psql -e "DATABASE_URL=postgres://app:app@localhost:5432/app?sslmode=disable"
+# > SELECT user_id, event FROM registration_log;
+```
+
+### Tests
+
+The integration suite under
+[internal/storage/postgres/user_repo_test.go](internal/storage/postgres/user_repo_test.go)
+uses `testcontainers-go` to spin a fresh disposable Postgres for each
+test. Whole suite ≈ 10 s on a warm Docker. Skipped automatically with
+`-short`. Eight cases cover transactional Add (atomic happy path +
+rollback on duplicate), case-insensitive lookup, `ErrUserNotFound`
+mapping, password preservation on partial Update, email-collision on
+Update, FK cascade on Remove.
+
+For an ops-flavoured walkthrough of the Postgres backend, see
+[docs/postgres.md](docs/postgres.md).
+
+---
+
 ## Architecture invariants
 
 1. **Contract → Service → Repository.** REST and gRPC handlers are
@@ -440,16 +545,21 @@ Selected sharp edges (not blockers — noted for future hardening):
 - **CSV header positional, not named.** Reordered columns swap fields
   silently. UTF-8 BOM is stripped; column-name validation is the next
   step.
-- **Email keys not normalised by Service.AddUser.** `IsValidEmail`
-  enforces format, and `DedupStore` lower-cases for run-time dedup,
-  but `Repository.Add` uses the raw email as written.
-- **Cross-process consistency.** `cmd/api` loads `.data/users.json`
-  once at boot. Writes from a concurrently-running `cmd/ingest
-  -register` are invisible to the running api until restart. The
-  recommended workflow is to use the API for create/update and the
-  CLI as a read-only inspector.
+- **Email normalisation in `jsonfile` / `memory` backends.**
+  `Repository.Add` for the file/memory strategies stores the raw
+  email as written. The Day-5 **postgres** backend enforces case-
+  insensitive uniqueness at the DB layer (`lower(email)` unique
+  index) so this gap only applies if you pick the legacy backends.
+- **Cross-process consistency in `jsonfile` mode.** `cmd/api` loads
+  `.data/users.json` once at boot. Writes from a concurrently-running
+  `cmd/ingest -register` are invisible to the running api until
+  restart. Mitigation: use the **postgres** backend for any
+  multi-process workflow — both `cmd/api` and `cmd/ingest` see the
+  same rows immediately.
 - **Tokens are in-memory.** Bucket state is lost on api restart.
-  Persistence is a Day-5+ concern.
+  Persistence is a Day-6+ concern (Day 5 chose to keep tokens
+  decoupled from the user repo to keep the transactional demo
+  focused on `users` + `registration_log`).
 - **gRPC channel is plaintext.** `insecure.NewCredentials()` is fine
   for localhost; production needs TLS + interceptor-based auth.
 
@@ -461,6 +571,9 @@ go generate ./internal/transport/httpapi/gen/...
 
 # Protobuf (Day 4) → Go.
 go generate ./proto/...
+
+# SQL queries (Day 5) → Go via sqlc.
+make sqlc-gen
 
 # Both (and anything else with //go:generate).
 go generate ./...
