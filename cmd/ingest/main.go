@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"google.golang.org/grpc"
@@ -45,11 +46,34 @@ func main() {
 	switch {
 	case cfg.register:
 		runRegister(svc, cfg)
+	case cfg.list:
+		runList(svc)
 	case cfg.deleteProfile:
 		runDeleteProfile(svc, cfg)
 	default:
 		runIngest(cfg, logger, svc)
 	}
+}
+
+// runList prints all users in the persistent store as a tab-aligned
+// table. This is the Day-1 "List users" deliverable surface — no
+// auth, no gRPC, just the repository read-through.
+func runList(svc *user.Service) {
+	users, err := svc.ListUsers(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "list failed: %v\n", err)
+		os.Exit(1)
+	}
+	if len(users) == 0 {
+		fmt.Println("(no users registered)")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tNAME\tEMAIL")
+	for _, u := range users {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", u.ID, u.Name, u.Email)
+	}
+	_ = w.Flush()
 }
 
 // runRegister handles `-register` and exits the process. Auth is not
@@ -202,6 +226,7 @@ type config struct {
 	verbose     bool
 
 	register      bool
+	list          bool
 	deleteProfile bool
 	email         string
 	password      string
@@ -226,6 +251,7 @@ func parseFlags() config {
 	verbose := flag.Bool("verbose", false, "log every record (high overhead at >100k rec/s)")
 
 	register := flag.Bool("register", false, "register a new user (with -email -name -password) and exit")
+	list := flag.Bool("list", false, "print all users in the persistent store and exit (no auth)")
 	deleteProfile := flag.Bool("delete-profile", false, "authenticate (with -email -password) and delete the user, then exit")
 	email := flag.String("email", "", "user email (login or register)")
 	password := flag.String("password", "", "user password (or set $INGEST_PASSWORD)")
@@ -261,6 +287,7 @@ func parseFlags() config {
 		workMax:       *workMax,
 		verbose:       *verbose,
 		register:      *register,
+		list:          *list,
 		deleteProfile: *deleteProfile,
 		email:         *email,
 		password:      pwd,

@@ -1,0 +1,71 @@
+{
+  // Tasks invoked automatically by launch.json's preLaunchTask, or
+  // manually via Cmd+Shift+P → "Tasks: Run Task".
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ensure: data fixture",
+      "type": "shell",
+      "command": "test -f data/users_a.csv || go run ./cmd/gen -files 4 -rows 250 -dup 15",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "ensure: data_10 fixture",
+      "type": "shell",
+      "command": "test -f data_10/users_a.csv || go run ./cmd/gen -dir data_10 -files 1 -rows 10 -dup 0",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "regen: protobuf stubs",
+      "type": "shell",
+      "command": "go generate ./proto/...",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "test: all packages (-race)",
+      "type": "shell",
+      "command": "go test -race ./...",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "smoke: token bucket end-to-end",
+      "type": "shell",
+      "command": "scripts/smoke-tokens.sh || true",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "reset: users + .data",
+      "type": "shell",
+      "command": "rm -rf .data && echo 'cleared .data/'",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

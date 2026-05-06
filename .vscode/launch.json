@@ -1,0 +1,131 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API server (REST :8080 + gRPC :9090)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/api",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "-addr", ":8080",
+        "-grpc-addr", ":9090",
+        "-store-path", ".data/users.json",
+        "-tokens-config", "config/tokens.yaml"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Ingest — 10-row debug",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/ingest",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "-workers", "4",
+        "-repl=false",
+        "-work-min", "50ms",
+        "-work-max", "150ms",
+        "-email", "alice@example.com",
+        "-password", "secret123",
+        "-grpc-addr", ":9090",
+        "data_10/"
+      ],
+      "console": "integratedTerminal",
+      "preLaunchTask": "ensure: data_10 fixture"
+    },
+    {
+      "name": "Ingest — 1k batch",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/ingest",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "-workers", "8",
+        "-repl=false",
+        "-email", "alice@example.com",
+        "-password", "secret123",
+        "-grpc-addr", ":9090",
+        "data/"
+      ],
+      "console": "integratedTerminal",
+      "preLaunchTask": "ensure: data fixture"
+    },
+    {
+      "name": "Day 1 CLI — register Alice",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/ingest",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "-register",
+        "-name", "Alice",
+        "-email", "alice@example.com",
+        "-password", "secret123"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Day 1 CLI — list users",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/ingest",
+      "cwd": "${workspaceFolder}",
+      "args": [ "-list" ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "gRPC demo — list users",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/grpc-demo",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "-addr", ":9090",
+        "-list"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Tests — internal/transport/grpc",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/internal/transport/grpc",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Tests — internal/tokens",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/internal/tokens",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Tests — internal/transport/httpapi",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${workspaceFolder}/internal/transport/httpapi",
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "FULL: API + Ingest (10-row)",
+      "configurations": [
+        "API server (REST :8080 + gRPC :9090)",
+        "Ingest — 10-row debug"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "go", "order": 1 }
+    }
+  ]
+}
