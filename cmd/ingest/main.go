@@ -43,6 +43,11 @@ func main() {
 		logger.Error("init repository failed", "err", err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := repo.Close(); err != nil {
+			logger.Error("repository close failed", "err", err)
+		}
+	}()
 	svc := user.NewService(repo, logger, metrics.New())
 
 	switch {

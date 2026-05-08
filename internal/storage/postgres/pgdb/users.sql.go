@@ -42,57 +42,73 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-const deleteUser = `-- name: DeleteUser :exec
-DELETE FROM users WHERE id = $1
+const deleteUser = `-- name: DeleteUser :one
+DELETE FROM users
+WHERE  id = $1
+RETURNING id
 `
 
-func (q *Queries) DeleteUser(ctx context.Context, id string) error {
-	_, err := q.db.Exec(ctx, deleteUser, id)
-	return err
+func (q *Queries) DeleteUser(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, deleteUser, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, password_hash, created_at
+SELECT id, name, email, password_hash
 FROM   users
 WHERE  lower(email) = lower($1)
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error) {
+type GetUserByEmailRow struct {
+	ID           string
+	Name         string
+	Email        string
+	PasswordHash string
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (GetUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, lower)
-	var i User
+	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Email,
 		&i.PasswordHash,
-		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, name, email, password_hash, created_at
+SELECT id, name, email, password_hash
 FROM   users
 WHERE  id = $1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
+type GetUserByIDRow struct {
+	ID           string
+	Name         string
+	Email        string
+	PasswordHash string
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
-	var i User
+	var i GetUserByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Email,
 		&i.PasswordHash,
-		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, name, email, password_hash, created_at
+SELECT id, name, email, password_hash
 FROM   users
-ORDER  BY created_at, id
+ORDER  BY id
 LIMIT  $1 OFFSET $2
 `
 
@@ -101,21 +117,27 @@ type ListUsersParams struct {
 	Offset int32
 }
 
-func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
+type ListUsersRow struct {
+	ID           string
+	Name         string
+	Email        string
+	PasswordHash string
+}
+
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
 	rows, err := q.db.Query(ctx, listUsers, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []User
+	var items []ListUsersRow
 	for rows.Next() {
-		var i User
+		var i ListUsersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.Email,
 			&i.PasswordHash,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -142,27 +164,42 @@ func (q *Queries) LogRegistration(ctx context.Context, arg LogRegistrationParams
 	return err
 }
 
-const updateUser = `-- name: UpdateUser :exec
+const updateUser = `-- name: UpdateUser :one
 UPDATE users
-SET    name = $2,
-       email = $3,
-       password_hash = $4
-WHERE  id = $1
+SET    name = $1,
+       email = $2,
+       password_hash = COALESCE(NULLIF($3::text, ''), password_hash)
+WHERE  id = $4
+RETURNING id, name, email, password_hash
 `
 
 type UpdateUserParams struct {
+	Name         string
+	Email        string
+	PasswordHash string
+	ID           string
+}
+
+type UpdateUserRow struct {
 	ID           string
 	Name         string
 	Email        string
 	PasswordHash string
 }
 
-func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
-	_, err := q.db.Exec(ctx, updateUser,
-		arg.ID,
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateUserRow, error) {
+	row := q.db.QueryRow(ctx, updateUser,
 		arg.Name,
 		arg.Email,
 		arg.PasswordHash,
+		arg.ID,
 	)
-	return err
+	var i UpdateUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.PasswordHash,
+	)
+	return i, err
 }

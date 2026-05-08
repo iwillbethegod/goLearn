@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,9 +23,10 @@ import (
 
 // UserRepo persists model.User to Postgres via pgxpool + sqlc.
 type UserRepo struct {
-	pool   *pgxpool.Pool
-	q      *pgdb.Queries
-	logger *slog.Logger
+	pool      *pgxpool.Pool
+	q         *pgdb.Queries
+	logger    *slog.Logger
+	closeOnce sync.Once
 }
 
 // NewUserRepo opens a pgxpool connection at dsn, pings to verify
@@ -45,8 +47,12 @@ func NewUserRepo(ctx context.Context, dsn string, logger *slog.Logger) (*UserRep
 	return &UserRepo{pool: pool, q: pgdb.New(pool), logger: logger}, nil
 }
 
-// Close releases the underlying connection pool.
-func (r *UserRepo) Close() { r.pool.Close() }
+// Close releases the underlying connection pool. Safe to call
+// multiple times; only the first call drains the pool.
+func (r *UserRepo) Close() error {
+	r.closeOnce.Do(r.pool.Close)
+	return nil
+}
 
 // Add persists a user inside a single transaction that also writes
 // to registration_log. Either both rows land or neither — the Day-5
@@ -94,7 +100,7 @@ func (r *UserRepo) Get(ctx context.Context, id string) (model.User, error) {
 	if err != nil {
 		return model.User{}, mapErr(err)
 	}
-	return toModel(row), nil
+	return model.User{ID: row.ID, Name: row.Name, Email: row.Email, PasswordHash: row.PasswordHash}, nil
 }
 
 func (r *UserRepo) GetByEmail(ctx context.Context, email string) (model.User, error) {
@@ -108,29 +114,22 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (model.User, er
 	if err != nil {
 		return model.User{}, mapErr(err)
 	}
-	return toModel(row), nil
+	return model.User{ID: row.ID, Name: row.Name, Email: row.Email, PasswordHash: row.PasswordHash}, nil
 }
 
-// Update overwrites name + email + password_hash for u.ID. An empty
-// PasswordHash on the incoming User preserves the stored one
-// (matches the memory + jsonfile semantics).
+// Update overwrites name + email for u.ID in a single statement.
+// An empty PasswordHash on the incoming User preserves the stored
+// one via COALESCE(NULLIF(...)) — matches memory + jsonfile semantics
+// without a Get-then-Update race window.
 func (r *UserRepo) Update(ctx context.Context, u model.User) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	current, err := r.q.GetUserByID(ctx, u.ID)
-	if err != nil {
-		return mapErr(err)
-	}
-	pwd := u.PasswordHash
-	if pwd == "" {
-		pwd = current.PasswordHash
-	}
-	if err := r.q.UpdateUser(ctx, pgdb.UpdateUserParams{
+	if _, err := r.q.UpdateUser(ctx, pgdb.UpdateUserParams{
 		ID:           u.ID,
 		Name:         u.Name,
 		Email:        u.Email,
-		PasswordHash: pwd,
+		PasswordHash: u.PasswordHash,
 	}); err != nil {
 		return mapErr(err)
 	}
@@ -138,8 +137,9 @@ func (r *UserRepo) Update(ctx context.Context, u model.User) error {
 	return nil
 }
 
-// Remove deletes by ID, verifying the row exists first so we can
-// return a clean ErrUserNotFound rather than a silent success.
+// Remove deletes by ID. The DELETE ... RETURNING id query maps a
+// missing row to pgx.ErrNoRows in a single round-trip, so there is
+// no Get-then-Delete race.
 func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -147,10 +147,7 @@ func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	if strings.TrimSpace(userID) == "" {
 		return model.ErrInvalidUser
 	}
-	if _, err := r.q.GetUserByID(ctx, userID); err != nil {
-		return mapErr(err)
-	}
-	if err := r.q.DeleteUser(ctx, userID); err != nil {
+	if _, err := r.q.DeleteUser(ctx, userID); err != nil {
 		return mapErr(err)
 	}
 	r.logger.Info("user deleted", "user_id", userID)
@@ -186,7 +183,7 @@ func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]model.User, i
 	}
 	out := make([]model.User, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toModel(row))
+		out = append(out, model.User{ID: row.ID, Name: row.Name, Email: row.Email, PasswordHash: row.PasswordHash})
 	}
 	return out, total, nil
 }
@@ -214,11 +211,3 @@ func mapErr(err error) error {
 	return model.NewStorageError(err)
 }
 
-func toModel(u pgdb.User) model.User {
-	return model.User{
-		ID:           u.ID,
-		Name:         u.Name,
-		Email:        u.Email,
-		PasswordHash: u.PasswordHash,
-	}
-}

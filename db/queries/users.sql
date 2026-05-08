@@ -7,30 +7,33 @@ INSERT INTO registration_log (user_id, event)
 VALUES ($1, $2);
 
 -- name: GetUserByID :one
-SELECT id, name, email, password_hash, created_at
+SELECT id, name, email, password_hash
 FROM   users
 WHERE  id = $1;
 
 -- name: GetUserByEmail :one
-SELECT id, name, email, password_hash, created_at
+SELECT id, name, email, password_hash
 FROM   users
 WHERE  lower(email) = lower($1);
 
 -- name: ListUsers :many
-SELECT id, name, email, password_hash, created_at
+SELECT id, name, email, password_hash
 FROM   users
-ORDER  BY created_at, id
+ORDER  BY id
 LIMIT  $1 OFFSET $2;
 
 -- name: CountUsers :one
 SELECT COUNT(*) FROM users;
 
--- name: UpdateUser :exec
+-- name: UpdateUser :one
 UPDATE users
-SET    name = $2,
-       email = $3,
-       password_hash = $4
-WHERE  id = $1;
+SET    name = sqlc.arg(name),
+       email = sqlc.arg(email),
+       password_hash = COALESCE(NULLIF(sqlc.arg(password_hash)::text, ''), password_hash)
+WHERE  id = sqlc.arg(id)
+RETURNING id, name, email, password_hash;
 
--- name: DeleteUser :exec
-DELETE FROM users WHERE id = $1;
+-- name: DeleteUser :one
+DELETE FROM users
+WHERE  id = $1
+RETURNING id;

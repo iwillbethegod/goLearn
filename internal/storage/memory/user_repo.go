@@ -172,4 +172,7 @@ func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	return nil
 }
 
+// Close is a no-op — the in-memory backend owns no external resources.
+func (r *UserRepo) Close() error { return nil }
+
 var _ user.Repository = (*UserRepo)(nil)

@@ -76,7 +76,7 @@ func newTestRepo(t *testing.T) *postgres.UserRepo {
 	if err != nil {
 		t.Fatalf("NewUserRepo: %v", err)
 	}
-	t.Cleanup(repo.Close)
+	t.Cleanup(func() { _ = repo.Close() })
 	return repo
 }
 
@@ -254,7 +254,7 @@ func TestRemove_OK_DeletesAuditTooViaCascade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUserRepo: %v", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
 	if err := repo.Add(ctx, model.User{ID: "u-1", Name: "A", Email: "a@x.com"}); err != nil {
 		t.Fatal(err)
