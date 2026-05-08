@@ -44,17 +44,26 @@ func init() {
 }
 
 type Service struct {
-	repo    Repository
-	logger  *slog.Logger
-	metrics *metrics.Metrics
+	repo      Repository
+	logger    *slog.Logger
+	metrics   *metrics.Metrics
+	publisher Publisher
 }
 
-func NewService(repo Repository, logger *slog.Logger, metricsCollector *metrics.Metrics) *Service {
-	return &Service{
-		repo:    repo,
-		logger:  logger,
-		metrics: metricsCollector,
+// NewService builds a *Service. The default Publisher is a no-op so
+// existing call sites keep working without a broker; pass
+// WithPublisher(p) to fan out domain events.
+func NewService(repo Repository, logger *slog.Logger, metricsCollector *metrics.Metrics, opts ...Option) *Service {
+	s := &Service{
+		repo:      repo,
+		logger:    logger,
+		metrics:   metricsCollector,
+		publisher: noopPublisher{},
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Service) Logger() *slog.Logger {
@@ -218,6 +227,14 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (m
 
 	s.metrics.IncUserAdded()
 	s.logger.InfoContext(ctx, "user registered", "user_id", newUser.ID, "email", newUser.Email)
+
+	// Best-effort post-commit publish. The user is already in the DB;
+	// failing Register on a broker hiccup would be misleading. The
+	// publisher derives a detached ctx so a client disconnect after
+	// commit doesn't drop the event.
+	if err := s.publisher.PublishUserCreated(ctx, newUser); err != nil {
+		s.logger.ErrorContext(ctx, "publish user.created failed", "error", err, "user_id", newUser.ID)
+	}
 	return newUser, nil
 }
 

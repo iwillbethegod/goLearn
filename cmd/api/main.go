@@ -43,6 +43,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
+	natsevents "github.com/ashishsinghbhadoria/goLearn/internal/events/nats"
 	"github.com/ashishsinghbhadoria/goLearn/internal/observability"
 	"github.com/ashishsinghbhadoria/goLearn/internal/storage/postgres"
 	"github.com/ashishsinghbhadoria/goLearn/internal/tokens"
@@ -72,6 +73,7 @@ type apiConfig struct {
 	otelService     string
 	otelEndpoint    string
 	otelExporter    string
+	natsURL         string
 	shutdownTimeout time.Duration
 	readTimeout     time.Duration
 	writeTimeout    time.Duration
@@ -91,6 +93,7 @@ func parseAPIFlags() apiConfig {
 	flag.StringVar(&cfg.otelService, "otel-service-name", firstNonEmpty(os.Getenv("OTEL_SERVICE_NAME"), "goLearn-api"), "OTel service.name resource attr")
 	flag.StringVar(&cfg.otelEndpoint, "otel-endpoint", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"), "OTLP gRPC endpoint (e.g. localhost:4317); empty disables OTLP")
 	flag.StringVar(&cfg.otelExporter, "otel-exporter", os.Getenv("OTEL_TRACES_EXPORTER"), "trace exporter: otlp | stdout | none (defaults to otlp when -otel-endpoint is set)")
+	flag.StringVar(&cfg.natsURL, "nats-url", os.Getenv("NATS_URL"), "NATS JetStream URL (e.g. nats://localhost:4222); empty disables event publishing")
 	flag.DurationVar(&cfg.shutdownTimeout, "shutdown-timeout", 5*time.Second, "graceful shutdown grace period")
 	flag.DurationVar(&cfg.readTimeout, "read-timeout", 10*time.Second, "max request read time including body")
 	flag.DurationVar(&cfg.writeTimeout, "write-timeout", 10*time.Second, "max time before writing response")
@@ -147,7 +150,23 @@ func run() error {
 			logger.Error("repository close", "err", err)
 		}
 	}()
-	svc := user.NewService(repo, logger, metrics.New())
+
+	var svcOpts []user.Option
+	if cfg.natsURL != "" {
+		pub, err := natsevents.NewPublisher(rootCtx, cfg.natsURL, logger)
+		if err != nil {
+			return fmt.Errorf("nats publisher: %w", err)
+		}
+		defer func() {
+			if err := pub.Close(); err != nil {
+				logger.Error("nats publisher close", "err", err)
+			}
+		}()
+		svcOpts = append(svcOpts, user.WithPublisher(pub))
+		logger.Info("nats publisher wired", "url", cfg.natsURL, "stream", natsevents.StreamName)
+	}
+
+	svc := user.NewService(repo, logger, metrics.New(), svcOpts...)
 	h := httpapi.NewHandler(svc, logger)
 
 	tokensCfg, err := tokens.Load(cfg.tokensCfgPath)
