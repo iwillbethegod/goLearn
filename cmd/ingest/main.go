@@ -20,17 +20,44 @@ import (
 	"github.com/ashishsinghbhadoria/goLearn/internal/handler"
 	"github.com/ashishsinghbhadoria/goLearn/internal/ingest"
 	"github.com/ashishsinghbhadoria/goLearn/internal/model"
+	"github.com/ashishsinghbhadoria/goLearn/internal/observability"
 	"github.com/ashishsinghbhadoria/goLearn/internal/pool"
 	"github.com/ashishsinghbhadoria/goLearn/internal/processor"
 	"github.com/ashishsinghbhadoria/goLearn/internal/repl"
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
+	pkglogger "github.com/ashishsinghbhadoria/goLearn/pkg/logger"
 	"github.com/ashishsinghbhadoria/goLearn/pkg/metrics"
 	userpb "github.com/ashishsinghbhadoria/goLearn/proto/gen/userpb"
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "fatal:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	cfg := parseFlags()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(pkglogger.NewTraceHandler(
+		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}),
+	))
+
+	otelShutdown, err := observability.Init(context.Background(), observability.Config{
+		ServiceName: firstNonEmpty(os.Getenv("OTEL_SERVICE_NAME"), "goLearn-ingest"),
+		Endpoint:    os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		Exporter:    os.Getenv("OTEL_TRACES_EXPORTER"),
+	})
+	if err != nil {
+		return fmt.Errorf("observability init: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Error("otel shutdown", "err", err)
+		}
+	}()
 
 	repo, err := app.NewRepository(app.RepositoryConfig{
 		Type:     app.RepositoryType(cfg.storage),
@@ -40,102 +67,92 @@ func main() {
 		Logger:   logger,
 	})
 	if err != nil {
-		logger.Error("init repository failed", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("init repository: %w", err)
 	}
 	defer func() {
 		if err := repo.Close(); err != nil {
-			logger.Error("repository close failed", "err", err)
+			logger.Error("repository close", "err", err)
 		}
 	}()
 	svc := user.NewService(repo, logger, metrics.New())
 
 	switch {
 	case cfg.register:
-		runRegister(svc, cfg)
+		return runRegister(svc, cfg)
 	case cfg.list:
-		runList(svc)
+		return runList(svc)
 	case cfg.deleteProfile:
-		runDeleteProfile(svc, cfg)
+		return runDeleteProfile(svc, cfg)
 	default:
-		runIngest(cfg, logger, svc)
+		return runIngest(cfg, logger, svc)
 	}
 }
 
 // runList prints all users in the persistent store as a tab-aligned
 // table. This is the Day-1 "List users" deliverable surface — no
 // auth, no gRPC, just the repository read-through.
-func runList(svc *user.Service) {
+func runList(svc *user.Service) error {
 	users, total, err := svc.ListUsers(context.Background(), 0, 0)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "list failed: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("list: %w", err)
 	}
 	if total == 0 {
 		fmt.Println("(no users registered)")
-		return
+		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tNAME\tEMAIL")
 	for _, u := range users {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", u.ID, u.Name, u.Email)
 	}
-	_ = w.Flush()
+	return w.Flush()
 }
 
 // runRegister handles `-register` and exits the process. Auth is not
-// required (registering IS the way to get auth). Successful exit 0,
-// any failure exit 1.
-func runRegister(svc *user.Service, cfg config) {
+// required (registering IS the way to get auth).
+func runRegister(svc *user.Service, cfg config) error {
 	if cfg.email == "" || cfg.password == "" || cfg.name == "" {
-		fmt.Fprintln(os.Stderr, "usage: ingest -register -email <e> -name <n> -password <p>")
-		os.Exit(1)
+		return errors.New("usage: ingest -register -email <e> -name <n> -password <p>")
 	}
 	u, err := svc.Register(context.Background(), cfg.name, cfg.email, cfg.password)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "register failed: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("register: %w", err)
 	}
 	fmt.Printf("registered user %s <%s> (id=%s)\n", u.Name, u.Email, u.ID)
+	return nil
 }
 
 // runDeleteProfile authenticates the caller and then deletes their
 // own profile from the persistent store.
-func runDeleteProfile(svc *user.Service, cfg config) {
+func runDeleteProfile(svc *user.Service, cfg config) error {
 	if cfg.email == "" || cfg.password == "" {
-		fmt.Fprintln(os.Stderr, "usage: ingest -delete-profile -email <e> -password <p>")
-		os.Exit(1)
+		return errors.New("usage: ingest -delete-profile -email <e> -password <p>")
 	}
 	if err := svc.DeleteByEmail(context.Background(), cfg.email, cfg.password); err != nil {
 		if errors.Is(err, model.ErrInvalidCredential) {
-			fmt.Fprintln(os.Stderr, "delete failed: invalid email or password")
-		} else {
-			fmt.Fprintf(os.Stderr, "delete failed: %v\n", err)
+			return errors.New("delete failed: invalid email or password")
 		}
-		os.Exit(1)
+		return fmt.Errorf("delete: %w", err)
 	}
 	fmt.Printf("profile deleted for %s\n", cfg.email)
+	return nil
 }
 
 // runIngest authenticates and then runs the concurrent CSV pipeline.
-func runIngest(cfg config, logger *slog.Logger, svc *user.Service) {
+func runIngest(cfg config, logger *slog.Logger, svc *user.Service) error {
 	if cfg.email == "" || cfg.password == "" {
-		fmt.Fprintln(os.Stderr, "ingest requires authentication: -email <e> -password <p> (or use -register / -delete-profile)")
-		os.Exit(1)
+		return errors.New("ingest requires authentication: -email <e> -password <p> (or use -register / -delete-profile)")
 	}
 	if len(cfg.paths) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: ingest [flags] <file-or-folder> [<file-or-folder> ...]")
-		os.Exit(1)
+		return errors.New("usage: ingest [flags] <file-or-folder> [<file-or-folder> ...]")
 	}
 
 	authedUser, err := svc.Login(context.Background(), cfg.email, cfg.password)
 	if err != nil {
 		if errors.Is(err, model.ErrInvalidCredential) {
-			fmt.Fprintln(os.Stderr, "login failed: invalid email or password")
-		} else {
-			fmt.Fprintf(os.Stderr, "login failed: %v\n", err)
+			return errors.New("login failed: invalid email or password")
 		}
-		os.Exit(1)
+		return fmt.Errorf("login: %w", err)
 	}
 
 	reg := processor.NewRegistry()
@@ -143,18 +160,15 @@ func runIngest(cfg config, logger *slog.Logger, svc *user.Service) {
 
 	proc, err := reg.Lookup(cfg.format)
 	if err != nil {
-		logger.Error("processor lookup failed", "format", cfg.format, "err", err)
-		os.Exit(1)
+		return fmt.Errorf("processor lookup format=%s: %w", cfg.format, err)
 	}
 
 	files, err := ingest.Expand(cfg.paths, proc.Extensions())
 	if err != nil {
-		logger.Error("expand paths failed", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("expand paths: %w", err)
 	}
 	if len(files) == 0 {
-		logger.Error("no input files matched", "format", cfg.format)
-		os.Exit(1)
+		return fmt.Errorf("no input files matched format=%s", cfg.format)
 	}
 
 	rootCtx, rootCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -183,8 +197,7 @@ func runIngest(cfg config, logger *slog.Logger, svc *user.Service) {
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
 		if err != nil {
-			logger.Error("grpc dial failed", "addr", cfg.grpcAddr, "err", err)
-			os.Exit(1)
+			return fmt.Errorf("grpc dial %s: %w", cfg.grpcAddr, err)
 		}
 		defer conn.Close()
 		gate := newTokenGate(userpb.NewUserServiceClient(conn), authedUser.ID, logger)
@@ -219,6 +232,7 @@ func runIngest(cfg config, logger *slog.Logger, svc *user.Service) {
 
 	printSummary(stats.Snapshot(), dedupStore, runner, wall, p.WorkerCount(), authedUser.Email)
 	rootCancel()
+	return nil
 }
 
 type config struct {
@@ -339,4 +353,13 @@ func printSummary(snap handler.Snapshot, store *user.DedupStore, runner *ingest.
 	for _, fs := range runner.Files() {
 		fmt.Printf("file=%s records=%d duration=%s\n", fs.Path, fs.Records, fs.Duration)
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

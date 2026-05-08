@@ -1,21 +1,29 @@
-# Local-dev Docker stack for Day-5. Brings up just Postgres; the
-# Go binaries (cmd/api, cmd/ingest, …) run on the host. Override
-# any value in .env (gitignored — see .env.example for the
-# template).
+# Local-dev Docker stack. Brings up Postgres + NATS JetStream + Jaeger
+# all-in-one. The Go binaries (cmd/api, cmd/ingest, cmd/consumer) run
+# on the host and reach each container via the host-bound ports below.
 #
-#   make compose-up      # start the db
-#   make migrate-up      # apply schema migrations
-#   make compose-down    # tear it down (data persists in volume)
+#   make compose-up       # start db + nats + jaeger
+#   make migrate-up       # apply schema migrations (1+2)
+#   make compose-down     # tear down (postgres + nats data persist)
+#
+# Credentials in .env (gitignored). Ports are bound to 127.0.0.1 so
+# this dev stack isn't accidentally exposed on a LAN.
+
+networks:
+  golearn-net:
+    name: golearn-net
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    networks: [golearn-net]
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       POSTGRES_DB:       ${POSTGRES_DB:-app}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,5 +32,39 @@ services:
       timeout:  3s
       retries:  10
 
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    networks: [golearn-net]
+    # -js          enable JetStream (durable streams + at-least-once)
+    # -sd /data    JetStream file store path (mounted volume below)
+    # -m 8222      HTTP monitoring port for /healthz probe
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - jsdata:/data
+    # TCP-open on 4222 fires BEFORE the JetStream file store finishes
+    # initialising, so we must probe the JS-aware /healthz endpoint.
+    # Otherwise consumers race the broker and fail with "no responders".
+    healthcheck:
+      test:     ["CMD", "wget", "-qO-", "http://localhost:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout:  3s
+      retries:  10
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    restart: unless-stopped
+    networks: [golearn-net]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"  # UI
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"    # OTLP gRPC (api + consumer push here)
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"    # OTLP HTTP
+
 volumes:
   pgdata:
+  jsdata:

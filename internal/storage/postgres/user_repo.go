@@ -13,9 +13,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/storage/postgres/pgdb"
@@ -30,15 +32,26 @@ type UserRepo struct {
 }
 
 // NewUserRepo opens a pgxpool connection at dsn, pings to verify
-// reachability, and returns a connected repository. The caller owns
-// the lifecycle: call Close when done.
+// reachability, and returns a connected repository. The pool is
+// configured with the otelpgx tracer so every query becomes a span
+// under whatever ctx the caller passes — this is what makes
+// "trace covers REST → DB" work end-to-end. WithTracerProvider is
+// passed explicitly (not via global) so the init order is loud:
+// observability.Init MUST run before NewUserRepo.
 func NewUserRepo(ctx context.Context, dsn string, logger *slog.Logger) (*UserRepo, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return nil, fmt.Errorf("postgres: empty DSN (set -db-dsn or $DATABASE_URL)")
 	}
-	pool, err := pgxpool.New(ctx, dsn)
+	pcfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, model.NewStorageError(fmt.Errorf("pgxpool.New: %w", err))
+		return nil, model.NewStorageError(fmt.Errorf("pgxpool.ParseConfig: %w", err))
+	}
+	pcfg.ConnConfig.Tracer = otelpgx.NewTracer(
+		otelpgx.WithTracerProvider(otel.GetTracerProvider()),
+	)
+	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
+	if err != nil {
+		return nil, model.NewStorageError(fmt.Errorf("pgxpool.NewWithConfig: %w", err))
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
@@ -85,7 +98,7 @@ func (r *UserRepo) Add(ctx context.Context, u model.User) error {
 	if err := tx.Commit(ctx); err != nil {
 		return mapErr(err)
 	}
-	r.logger.Info("user persisted", "user_id", u.ID)
+	r.logger.InfoContext(ctx, "user persisted", "user_id", u.ID)
 	return nil
 }
 
@@ -133,7 +146,7 @@ func (r *UserRepo) Update(ctx context.Context, u model.User) error {
 	}); err != nil {
 		return mapErr(err)
 	}
-	r.logger.Info("user persisted on update", "user_id", u.ID)
+	r.logger.InfoContext(ctx, "user persisted on update", "user_id", u.ID)
 	return nil
 }
 
@@ -150,7 +163,7 @@ func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	if _, err := r.q.DeleteUser(ctx, userID); err != nil {
 		return mapErr(err)
 	}
-	r.logger.Info("user deleted", "user_id", userID)
+	r.logger.InfoContext(ctx, "user deleted", "user_id", userID)
 	return nil
 }
 

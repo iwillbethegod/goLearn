@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Notification struct {
+	ID        int64
+	EventID   string
+	UserID    string
+	Kind      string
+	CreatedAt pgtype.Timestamptz
+}
+
 type RegistrationLog struct {
 	ID        int64
 	UserID    string

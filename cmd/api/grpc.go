@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
 	grpctransport "github.com/ashishsinghbhadoria/goLearn/internal/transport/grpc"
@@ -22,8 +23,13 @@ func startGRPC(addr string, svc *user.Service, store *tokens.Store, logger *slog
 	if err != nil {
 		return nil, err
 	}
+	// StatsHandler opens an RPC span before our access-log interceptor
+	// runs, so InfoContext picks up trace_id from ctx. ChainUnaryInterceptor
+	// (vs UnaryInterceptor) is forward-compat for adding auth / recovery
+	// interceptors later — single-line addition vs full rewrite.
 	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(grpcAccessLog(logger)),
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.ChainUnaryInterceptor(grpcAccessLog(logger)),
 	)
 	userpb.RegisterUserServiceServer(srv, grpctransport.NewServer(svc, store, logger))
 
@@ -42,7 +48,7 @@ func grpcAccessLog(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		start := time.Now()
 		resp, err := handler(ctx, req)
-		logger.Info("grpc",
+		logger.InfoContext(ctx, "grpc",
 			"method", info.FullMethod,
 			"err", err,
 			"dur", time.Since(start),

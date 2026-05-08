@@ -44,17 +44,26 @@ func init() {
 }
 
 type Service struct {
-	repo    Repository
-	logger  *slog.Logger
-	metrics *metrics.Metrics
+	repo      Repository
+	logger    *slog.Logger
+	metrics   *metrics.Metrics
+	publisher Publisher
 }
 
-func NewService(repo Repository, logger *slog.Logger, metricsCollector *metrics.Metrics) *Service {
-	return &Service{
-		repo:    repo,
-		logger:  logger,
-		metrics: metricsCollector,
+// NewService builds a *Service. The default Publisher is a no-op so
+// existing call sites keep working without a broker; pass
+// WithPublisher(p) to fan out domain events.
+func NewService(repo Repository, logger *slog.Logger, metricsCollector *metrics.Metrics, opts ...Option) *Service {
+	s := &Service{
+		repo:      repo,
+		logger:    logger,
+		metrics:   metricsCollector,
+		publisher: noopPublisher{},
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Service) Logger() *slog.Logger {
@@ -65,12 +74,12 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (model.User, 
 	trimmedName := strings.TrimSpace(name)
 	trimmedEmail := strings.TrimSpace(email)
 	if trimmedName == "" || trimmedEmail == "" {
-		s.logger.Error("invalid add user request", "error", model.ErrInvalidUser)
+		s.logger.ErrorContext(ctx, "invalid add user request", "error", model.ErrInvalidUser)
 		return model.User{}, model.ErrInvalidUser
 	}
 
 	if !model.IsValidEmail(trimmedEmail) {
-		s.logger.Error(invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
+		s.logger.ErrorContext(ctx, invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
 		return model.User{}, model.ErrInvalidEmail
 	}
 
@@ -81,12 +90,12 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (model.User, 
 	}
 
 	if err := s.repo.Add(ctx, newUser); err != nil {
-		s.logger.Error("repository failed to add user", "error", err, "user_id", newUser.ID)
+		s.logger.ErrorContext(ctx, "repository failed to add user", "error", err, "user_id", newUser.ID)
 		return model.User{}, err
 	}
 
 	s.metrics.IncUserAdded()
-	s.logger.Info("user created", "user_id", newUser.ID)
+	s.logger.InfoContext(ctx, "user created", "user_id", newUser.ID)
 	return newUser, nil
 }
 
@@ -96,7 +105,7 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (model.User, 
 func (s *Service) ListUsers(ctx context.Context, limit, offset int) ([]model.User, int64, error) {
 	users, total, err := s.repo.List(ctx, limit, offset)
 	if err != nil {
-		s.logger.Error("repository failed to list users", "error", err)
+		s.logger.ErrorContext(ctx, "repository failed to list users", "error", err)
 		return nil, 0, err
 	}
 	return users, total, nil
@@ -105,16 +114,16 @@ func (s *Service) ListUsers(ctx context.Context, limit, offset int) ([]model.Use
 func (s *Service) RemoveUser(ctx context.Context, userID string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		s.logger.Error("invalid remove user request", "error", model.ErrInvalidUser)
+		s.logger.ErrorContext(ctx, "invalid remove user request", "error", model.ErrInvalidUser)
 		return model.ErrInvalidUser
 	}
 
 	if err := s.repo.Remove(ctx, userID); err != nil {
-		s.logger.Error("repository failed to remove user", "error", err, "user_id", userID)
+		s.logger.ErrorContext(ctx, "repository failed to remove user", "error", err, "user_id", userID)
 		return err
 	}
 
-	s.logger.Info("user removed", "user_id", userID)
+	s.logger.InfoContext(ctx, "user removed", "user_id", userID)
 	return nil
 }
 
@@ -141,7 +150,7 @@ func (s *Service) GetUser(ctx context.Context, id string) (model.User, error) {
 	}
 	u, err := s.repo.Get(ctx, id)
 	if err != nil {
-		s.logger.Debug("repository get failed", "error", err, "user_id", id)
+		s.logger.DebugContext(ctx, "repository get failed", "error", err, "user_id", id)
 		return model.User{}, err
 	}
 	return u, nil
@@ -167,16 +176,16 @@ func (s *Service) UpdateUser(ctx context.Context, id, name, email string) (model
 	}
 	if trimmedEmail != "" {
 		if !model.IsValidEmail(trimmedEmail) {
-			s.logger.Error(invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
+			s.logger.ErrorContext(ctx, invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
 			return model.User{}, model.ErrInvalidEmail
 		}
 		current.Email = trimmedEmail
 	}
 	if err := s.repo.Update(ctx, current); err != nil {
-		s.logger.Error("repository failed to update user", "error", err, "user_id", id)
+		s.logger.ErrorContext(ctx, "repository failed to update user", "error", err, "user_id", id)
 		return model.User{}, err
 	}
-	s.logger.Info("user updated", "user_id", id)
+	s.logger.InfoContext(ctx, "user updated", "user_id", id)
 	return current, nil
 }
 
@@ -186,21 +195,21 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (m
 	trimmedName := strings.TrimSpace(name)
 	trimmedEmail := strings.TrimSpace(email)
 	if trimmedName == "" || trimmedEmail == "" {
-		s.logger.Error("invalid register request", "error", model.ErrInvalidUser)
+		s.logger.ErrorContext(ctx, "invalid register request", "error", model.ErrInvalidUser)
 		return model.User{}, model.ErrInvalidUser
 	}
 	if !model.IsValidEmail(trimmedEmail) {
-		s.logger.Error(invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
+		s.logger.ErrorContext(ctx, invalidEmailFmtMsg, "error", model.ErrInvalidEmail, "email", trimmedEmail)
 		return model.User{}, model.ErrInvalidEmail
 	}
 	if len(password) < MinPasswordLen {
-		s.logger.Error("password too short", "min", MinPasswordLen)
+		s.logger.ErrorContext(ctx, "password too short", "min", MinPasswordLen)
 		return model.User{}, model.ErrInvalidPassword
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		s.logger.Error("hash password failed", "error", err)
+		s.logger.ErrorContext(ctx, "hash password failed", "error", err)
 		return model.User{}, model.NewStorageError(err)
 	}
 
@@ -212,12 +221,20 @@ func (s *Service) Register(ctx context.Context, name, email, password string) (m
 	}
 
 	if err := s.repo.Add(ctx, newUser); err != nil {
-		s.logger.Error("repository failed to add user", "error", err, "user_id", newUser.ID)
+		s.logger.ErrorContext(ctx, "repository failed to add user", "error", err, "user_id", newUser.ID)
 		return model.User{}, err
 	}
 
 	s.metrics.IncUserAdded()
-	s.logger.Info("user registered", "user_id", newUser.ID, "email", newUser.Email)
+	s.logger.InfoContext(ctx, "user registered", "user_id", newUser.ID, "email", newUser.Email)
+
+	// Best-effort post-commit publish. The user is already in the DB;
+	// failing Register on a broker hiccup would be misleading. The
+	// publisher derives a detached ctx so a client disconnect after
+	// commit doesn't drop the event.
+	if err := s.publisher.PublishUserCreated(ctx, newUser); err != nil {
+		s.logger.ErrorContext(ctx, "publish user.created failed", "error", err, "user_id", newUser.ID)
+	}
 	return newUser, nil
 }
 
@@ -235,22 +252,22 @@ func (s *Service) Login(ctx context.Context, email, password string) (model.User
 			// Constant-time compensation: keep wall time comparable to
 			// the real-user path so an attacker can't distinguish.
 			_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
-			s.logger.Warn(loginFailedMsg, "reason", "no such user", "email", email)
+			s.logger.WarnContext(ctx, loginFailedMsg, "reason", "no such user", "email", email)
 			return model.User{}, model.ErrInvalidCredential
 		}
-		s.logger.Error("repository lookup failed", "error", err)
+		s.logger.ErrorContext(ctx, "repository lookup failed", "error", err)
 		return model.User{}, err
 	}
 	if u.PasswordHash == "" {
 		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
-		s.logger.Warn(loginFailedMsg, "reason", "user has no password set", "email", email)
+		s.logger.WarnContext(ctx, loginFailedMsg, "reason", "user has no password set", "email", email)
 		return model.User{}, model.ErrInvalidCredential
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
-		s.logger.Warn(loginFailedMsg, "reason", "bad password", "email", email)
+		s.logger.WarnContext(ctx, loginFailedMsg, "reason", "bad password", "email", email)
 		return model.User{}, model.ErrInvalidCredential
 	}
-	s.logger.Info("login ok", "user_id", u.ID, "email", u.Email)
+	s.logger.InfoContext(ctx, "login ok", "user_id", u.ID, "email", u.Email)
 	return u, nil
 }
 
@@ -263,9 +280,9 @@ func (s *Service) DeleteByEmail(ctx context.Context, email, password string) err
 		return err
 	}
 	if err := s.repo.Remove(ctx, u.ID); err != nil {
-		s.logger.Error("repository failed to remove user", "error", err, "user_id", u.ID)
+		s.logger.ErrorContext(ctx, "repository failed to remove user", "error", err, "user_id", u.ID)
 		return err
 	}
-	s.logger.Info("user deleted", "user_id", u.ID, "email", u.Email)
+	s.logger.InfoContext(ctx, "user deleted", "user_id", u.ID, "email", u.Email)
 	return nil
 }

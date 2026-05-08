@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"go.opentelemetry.io/otel"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/storage/postgres"
@@ -274,3 +277,13 @@ func TestRemove_OK_DeletesAuditTooViaCascade(t *testing.T) {
 // Compile-time interface check — uses a zero pgx.Tx just to silence
 // "imported and not used" without writing a runtime test for it.
 var _ = pgx.ErrNoRows
+
+// TestMain pins the global TracerProvider to a no-op for the duration
+// of this test file. The Day-6 otelpgx integration in NewUserRepo
+// reads otel.GetTracerProvider() at construction time; without an
+// explicit no-op we'd see "no provider registered" warning lines
+// during testcontainer runs.
+func TestMain(m *testing.M) {
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	os.Exit(m.Run())
+}
