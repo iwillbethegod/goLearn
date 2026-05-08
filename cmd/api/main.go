@@ -40,6 +40,7 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"google.golang.org/grpc"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
@@ -198,9 +199,19 @@ func run() error {
 		ErrorHandlerFunc: writeRouterError,
 	})
 
+	// otelhttp is the OUTERMOST handler so the root span covers the
+	// full request lifecycle, including the kin-openapi validator and
+	// every downstream middleware. WithSpanNameFormatter gives Jaeger
+	// readable names like "POST /users" instead of the literal "api".
+	rootHandler := otelhttp.NewHandler(mux, "api",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+	)
+
 	srv := &http.Server{
 		Addr:              cfg.addr,
-		Handler:           mux,
+		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.readTimeout,
 		WriteTimeout:      cfg.writeTimeout,
