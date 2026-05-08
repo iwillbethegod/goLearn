@@ -522,6 +522,64 @@ For an ops-flavoured walkthrough of the Postgres backend, see
 
 ---
 
+## Day 6 — NATS + OpenTelemetry
+
+Day 6 turns the user service into an event source and adds end-to-end
+tracing across the whole stack.
+
+```
+POST /users → cmd/api → user.Service.Register
+                          ├─ INSERT users (Postgres, otelpgx span)
+                          └─ publish user.created (NATS JetStream)
+                                       │
+                                       ▼ traceparent header
+                                cmd/consumer → INSERT notifications
+```
+
+- **Producer**: `internal/events/nats` ensures stream `USERS` (subjects
+  `user.>`, retention=Limits, MaxAge=24 h, MaxBytes=1 GiB) and
+  publishes `user.created.v1` events synchronously via JetStream.
+  The publish runs on a *detached* ctx (`context.WithoutCancel` +
+  carry SpanContext) so a client disconnect post-DB-commit doesn't
+  drop the event.
+- **Consumer**: `cmd/consumer` owns a durable pull consumer
+  `user-welcome` with `AckExplicit` + `MaxDeliver=5`. Each event
+  becomes a row in `notifications` via `INSERT … ON CONFLICT (event_id)
+  DO NOTHING` — JetStream redelivery is a silent no-op insert.
+- **Tracing**: `internal/observability` boots a `TracerProvider` that
+  picks OTLP→Jaeger / stdout / no-op based on env. `otelhttp` wraps
+  the mux, `otelgrpc` `StatsHandler` wraps the gRPC server, `otelpgx`
+  wraps the pgxpool, and the NATS publisher injects W3C `traceparent`
+  into headers. One `trace_id` spans REST → DB → NATS → consumer → DB.
+- **Log correlation**: `pkg/logger.TraceHandler` is a `slog.Handler`
+  decorator that pulls `trace_id` / `span_id` from ctx and adds them
+  as attrs. Every hot-path log line uses `InfoContext(ctx, …)` so the
+  handler sees the SpanContext.
+
+### Demo
+
+```bash
+make compose-up        # db + nats + jaeger
+make migrate-up        # migrations 000001 + 000002
+make api-run &
+make consumer-run &
+curl -X POST localhost:8080/users \
+  -H "content-type: application/json" \
+  -d '{"name":"Ada","email":"ada@example.com","password":"hunter22"}'
+
+# Then open http://localhost:16686 and search service goLearn-api.
+```
+
+For deeper notes:
+
+- [docs/eventing.md](docs/eventing.md) — subjects, JetStream config,
+  payload schema, idempotency, dual-write caveat + outbox future-work.
+- [docs/observability.md](docs/observability.md) — OTel bootstrap,
+  exporter modes, slog correlation, init-order rules, the
+  `InfoContext` footgun, demo trace.
+
+---
+
 ## Architecture invariants
 
 1. **Contract → Service → Repository.** REST and gRPC handlers are
