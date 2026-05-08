@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "API server (REST :8080 + gRPC :9090)",
+      "name": "API server (jsonfile, :8080 + :9090)",
       "type": "go",
       "request": "launch",
       "mode": "auto",
@@ -11,9 +11,29 @@
       "args": [
         "-addr", ":8080",
         "-grpc-addr", ":9090",
+        "-storage", "jsonfile",
         "-store-path", ".data/users.json",
         "-tokens-config", "config/tokens.yaml"
       ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "API server (postgres, :8080 + :9090)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/api",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "-addr", ":8080",
+        "-grpc-addr", ":9090",
+        "-storage", "postgres",
+        "-migrate=true",
+        "-tokens-config", "config/tokens.yaml"
+      ],
+      "env": {
+        "DATABASE_URL": "postgres://app:app@localhost:5432/app?sslmode=disable"
+      },
       "console": "integratedTerminal"
     },
     {

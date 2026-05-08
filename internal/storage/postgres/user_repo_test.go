@@ -118,9 +118,9 @@ func TestAdd_PersistsAndAuditsAtomically(t *testing.T) {
 	}
 
 	// registration_log row landed (transaction committed).
-	users, _ := repo.List(ctx)
-	if len(users) != 1 {
-		t.Fatalf("List len=%d, want 1", len(users))
+	users, total, _ := repo.List(ctx, 0, 0)
+	if len(users) != 1 || total != 1 {
+		t.Fatalf("List len=%d total=%d, want 1/1", len(users), total)
 	}
 }
 
@@ -144,9 +144,9 @@ func TestAdd_DuplicateEmailRollsBackBoth(t *testing.T) {
 	}
 
 	// users still has only one row.
-	users, _ := repo.List(ctx)
-	if len(users) != 1 {
-		t.Fatalf("after rejected Add: len=%d, want 1", len(users))
+	users, total, _ := repo.List(ctx, 0, 0)
+	if len(users) != 1 || total != 1 {
+		t.Fatalf("after rejected Add: len=%d total=%d, want 1/1", len(users), total)
 	}
 	// the failed transaction did NOT leave an audit row behind.
 	got, _ := repo.Get(ctx, "u-b")

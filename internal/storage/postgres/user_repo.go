@@ -157,19 +157,38 @@ func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	return nil
 }
 
-func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
+// listMaxLimit caps the per-page row count so a misbehaving caller
+// can't drag the entire users table over the wire by passing a giant
+// limit. limit <= 0 from the caller is treated as "give me one full
+// safety-capped page".
+const listMaxLimit = 1000
+
+func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]model.User, int64, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	rows, err := r.q.ListUsers(ctx)
+	if limit <= 0 || limit > listMaxLimit {
+		limit = listMaxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := r.q.ListUsers(ctx, pgdb.ListUsersParams{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
 	if err != nil {
-		return nil, mapErr(err)
+		return nil, 0, mapErr(err)
+	}
+	total, err := r.q.CountUsers(ctx)
+	if err != nil {
+		return nil, 0, mapErr(err)
 	}
 	out := make([]model.User, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, toModel(row))
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // mapErr translates pgx + Postgres SQLSTATE errors into the

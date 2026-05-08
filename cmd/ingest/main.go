@@ -61,12 +61,12 @@ func main() {
 // table. This is the Day-1 "List users" deliverable surface — no
 // auth, no gRPC, just the repository read-through.
 func runList(svc *user.Service) {
-	users, err := svc.ListUsers(context.Background())
+	users, total, err := svc.ListUsers(context.Background(), 0, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list failed: %v\n", err)
 		os.Exit(1)
 	}
-	if len(users) == 0 {
+	if total == 0 {
 		fmt.Println("(no users registered)")
 		return
 	}

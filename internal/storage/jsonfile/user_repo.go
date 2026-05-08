@@ -156,9 +156,9 @@ func (r *UserRepo) Update(ctx context.Context, u model.User) error {
 	return nil
 }
 
-func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
+func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]model.User, int64, error) {
 	if err := checkCtx(ctx); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -170,7 +170,21 @@ func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
 	sort.Slice(users, func(i, j int) bool {
 		return users[i].ID < users[j].ID
 	})
-	return users, nil
+
+	total := int64(len(users))
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(users) {
+		return []model.User{}, total, nil
+	}
+	end := len(users)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	page := make([]model.User, end-offset)
+	copy(page, users[offset:end])
+	return page, total, nil
 }
 
 func (r *UserRepo) load() error {

@@ -131,7 +131,7 @@ func TestRemoveUser(t *testing.T) {
 	}
 
 	// Verify user is gone
-	users, err := svc.ListUsers(context.Background())
+	users, _, err := svc.ListUsers(context.Background(), 0, 0)
 	if err != nil {
 		t.Fatalf("failed to list users: %v", err)
 	}

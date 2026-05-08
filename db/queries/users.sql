@@ -19,7 +19,11 @@ WHERE  lower(email) = lower($1);
 -- name: ListUsers :many
 SELECT id, name, email, password_hash, created_at
 FROM   users
-ORDER  BY id;
+ORDER  BY created_at, id
+LIMIT  $1 OFFSET $2;
+
+-- name: CountUsers :one
+SELECT COUNT(*) FROM users;
 
 -- name: UpdateUser :exec
 UPDATE users

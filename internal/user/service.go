@@ -90,13 +90,16 @@ func (s *Service) AddUser(ctx context.Context, name, email string) (model.User, 
 	return newUser, nil
 }
 
-func (s *Service) ListUsers(ctx context.Context) ([]model.User, error) {
-	users, err := s.repo.List(ctx)
+// ListUsers returns a page of users plus the unfiltered total count.
+// limit <= 0 asks the repository for its default safe page; offset < 0
+// is normalised to 0 by the repository.
+func (s *Service) ListUsers(ctx context.Context, limit, offset int) ([]model.User, int64, error) {
+	users, total, err := s.repo.List(ctx, limit, offset)
 	if err != nil {
 		s.logger.Error("repository failed to list users", "error", err)
-		return nil, err
+		return nil, 0, err
 	}
-	return users, nil
+	return users, total, nil
 }
 
 func (s *Service) RemoveUser(ctx context.Context, userID string) error {

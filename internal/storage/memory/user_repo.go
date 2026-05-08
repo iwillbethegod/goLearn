@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 
@@ -119,19 +120,36 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (model.User, er
 	return r.users[id], nil
 }
 
-// List returns all users from the in-memory store
-func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
+// List returns a deterministic page of users plus the total row count.
+// Sorting by ID makes pagination stable across calls — without it, map
+// iteration order would shuffle the page boundaries.
+func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]model.User, int64, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	users := make([]model.User, 0, len(r.users))
-	for _, user := range r.users {
-		users = append(users, user)
+	for _, u := range r.users {
+		users = append(users, u)
 	}
-	return users, nil
+	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
+
+	total := int64(len(users))
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(users) {
+		return []model.User{}, total, nil
+	}
+	end := len(users)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	page := make([]model.User, end-offset)
+	copy(page, users[offset:end])
+	return page, total, nil
 }
 
 // Remove removes a user by ID from the in-memory store

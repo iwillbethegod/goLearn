@@ -109,17 +109,16 @@ func (s *Server) GetUser(ctx context.Context, req *userpb.GetUserRequest) (*user
 }
 
 func (s *Server) ListUsers(ctx context.Context, req *userpb.ListUsersRequest) (*userpb.ListUsersResponse, error) {
-	users, err := s.svc.ListUsers(ctx)
+	limit, offset := paginationParams(req.GetLimit(), req.GetOffset())
+	users, total, err := s.svc.ListUsers(ctx, limit, offset)
 	if err != nil {
 		return nil, statusFor(err)
 	}
-	limit, offset := paginationParams(req.GetLimit(), req.GetOffset())
-	page := pageSlice(users, limit, offset)
-	out := make([]*userpb.User, 0, len(page))
-	for _, u := range page {
+	out := make([]*userpb.User, 0, len(users))
+	for _, u := range users {
 		out = append(out, toPBUser(u))
 	}
-	return &userpb.ListUsersResponse{Users: out, Total: int64(len(users))}, nil
+	return &userpb.ListUsersResponse{Users: out, Total: total}, nil
 }
 
 // ----- helpers -----
@@ -142,17 +141,6 @@ func paginationParams(limit, offset int32) (int, int) {
 		o = 0
 	}
 	return l, o
-}
-
-func pageSlice(users []model.User, limit, offset int) []model.User {
-	if offset >= len(users) {
-		return nil
-	}
-	end := offset + limit
-	if end > len(users) {
-		end = len(users)
-	}
-	return users[offset:end]
 }
 
 // toPBUser strips PasswordHash from the wire format. The .proto

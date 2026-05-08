@@ -59,3 +59,4 @@ func NewRepository(cfg RepositoryConfig) (user.Repository, error) {
 		return nil, fmt.Errorf("unknown repository type: %s", cfg.Type)
 	}
 }
+ 

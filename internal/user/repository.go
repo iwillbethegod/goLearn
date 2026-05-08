@@ -20,5 +20,8 @@ type Repository interface {
 	GetByEmail(ctx context.Context, email string) (model.User, error)
 	Update(ctx context.Context, u model.User) error
 	Remove(ctx context.Context, userID string) error
-	List(ctx context.Context) ([]model.User, error)
+	// List returns a page of users plus the unfiltered total row count.
+	// limit <= 0 means "no cap" (subject to backend-specific safety
+	// ceilings); offset < 0 is treated as 0.
+	List(ctx context.Context, limit, offset int) (items []model.User, total int64, err error)
 }

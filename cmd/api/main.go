@@ -150,11 +150,21 @@ func main() {
 
 	<-rootCtx.Done()
 	logger.Info("shutting down")
-	if grpcSrv != nil {
-		grpcSrv.GracefulStop()
-	}
 	shutdownCtx, sCancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 	defer sCancel()
+	if grpcSrv != nil {
+		done := make(chan struct{})
+		go func() {
+			grpcSrv.GracefulStop()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-shutdownCtx.Done():
+			logger.Warn("grpc graceful stop timed out; forcing", "timeout", *shutdownTimeout)
+			grpcSrv.Stop()
+		}
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown error", "err", err)
 		fmt.Fprintln(os.Stderr, err)
