@@ -82,7 +82,7 @@ func withRecover(logger *slog.Logger) gen.MiddlewareFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					logger.Error("panic recovered",
+					logger.ErrorContext(r.Context(), "panic recovered",
 						"request_id", requestID(r.Context()),
 						"method", r.Method, "path", r.URL.Path,
 						"panic", fmt.Sprint(rec),
@@ -104,7 +104,7 @@ func withAccessLog(logger *slog.Logger) gen.MiddlewareFunc {
 			start := time.Now()
 			rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rw, r)
-			logger.Info("http",
+			logger.InfoContext(r.Context(), "http",
 				"request_id", requestID(r.Context()),
 				"method", r.Method,
 				"path", r.URL.Path,

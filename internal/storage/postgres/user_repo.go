@@ -85,7 +85,7 @@ func (r *UserRepo) Add(ctx context.Context, u model.User) error {
 	if err := tx.Commit(ctx); err != nil {
 		return mapErr(err)
 	}
-	r.logger.Info("user persisted", "user_id", u.ID)
+	r.logger.InfoContext(ctx, "user persisted", "user_id", u.ID)
 	return nil
 }
 
@@ -133,7 +133,7 @@ func (r *UserRepo) Update(ctx context.Context, u model.User) error {
 	}); err != nil {
 		return mapErr(err)
 	}
-	r.logger.Info("user persisted on update", "user_id", u.ID)
+	r.logger.InfoContext(ctx, "user persisted on update", "user_id", u.ID)
 	return nil
 }
 
@@ -150,7 +150,7 @@ func (r *UserRepo) Remove(ctx context.Context, userID string) error {
 	if _, err := r.q.DeleteUser(ctx, userID); err != nil {
 		return mapErr(err)
 	}
-	r.logger.Info("user deleted", "user_id", userID)
+	r.logger.InfoContext(ctx, "user deleted", "user_id", userID)
 	return nil
 }
 
