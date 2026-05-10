@@ -19,7 +19,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -64,12 +63,18 @@ func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) 
 		return func(context.Context) error { return nil }, nil
 	}
 
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(cfg.ServiceName),
-			semconv.ServiceVersion(serviceVersion()),
+	// Use resource.New with WithAttributes (no explicit schema URL) so
+	// the merge with resource.Default() — which carries whatever schema
+	// the installed SDK ships with — never conflicts. The attribute
+	// keys match OTel semantic conventions even though we don't import
+	// a specific semconv version.
+	res, err := resource.New(ctx,
+		resource.WithFromEnv(),
+		resource.WithProcess(),
+		resource.WithTelemetrySDK(),
+		resource.WithAttributes(
+			attribute.String("service.name", cfg.ServiceName),
+			attribute.String("service.version", serviceVersion()),
 			attribute.String("deployment.environment.name", cfg.Environment),
 		),
 	)

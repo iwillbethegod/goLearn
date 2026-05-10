@@ -183,7 +183,7 @@ func (p *Pool) run(w *worker) {
 		case <-p.rootCtx.Done():
 			return
 		case qj := <-p.jobs:
-			qj.fn(withWorkerID(qj.ctx, w.id))
+			qj.fn(WithWorkerID(qj.ctx, w.id))
 		}
 	}
 }
