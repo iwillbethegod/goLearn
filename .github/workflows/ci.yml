@@ -23,17 +23,32 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: install gocovmerge
+        # Merges multiple coverprofile outputs without double-counting
+        # — concatenation alone would sum hit counts on duplicate
+        # file:line entries and skew the gate.
+        run: go install github.com/wadey/gocovmerge@latest
+
       - name: unit tests + coverage profile
         run: |
           go test -race -short -timeout=5m \
-              -coverprofile=cover.out \
+              -coverprofile=cover.unit.out \
               -coverpkg=./internal/...,./pkg/...,./cmd/api/... \
               ./...
 
-      - name: integration tests (testcontainers)
-        # Docker is preinstalled on ubuntu-latest. The build tag
-        # `integration` keeps these out of the unit run.
-        run: go test -tags=integration -race -timeout=10m ./internal/integration/...
+      - name: integration tests (testcontainers) + coverage
+        # Docker is preinstalled on ubuntu-latest. Build tag
+        # `integration` keeps these out of the unit run, AND we feed
+        # them into the same -coverpkg so the postgres + nats code
+        # paths exercised here count toward the gate.
+        run: |
+          go test -tags=integration -race -timeout=10m \
+              -coverprofile=cover.int.out \
+              -coverpkg=./internal/...,./pkg/...,./cmd/api/... \
+              ./internal/integration/...
+
+      - name: merge coverage profiles
+        run: gocovmerge cover.unit.out cover.int.out > cover.out
 
       - name: coverage gate (>= 70%, generated code excluded)
         env:

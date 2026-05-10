@@ -53,22 +53,31 @@ open http://localhost:16686
 ## Graceful shutdown — what `SIGTERM` does
 
 `docker compose stop` sends `SIGTERM` to every container; Compose then
-waits 30 s before escalating to `SIGKILL`. Each binary runs the same
-choreography:
+waits 30 s before escalating to `SIGKILL`. The actual order matches
+`cmd/api/main.go`'s `run()`: explicit teardown runs first (gRPC then
+HTTP), then deferred `Close`s unwind in LIFO:
 
 1. **`signal.NotifyContext`** flips the root ctx to cancelled.
-2. **HTTP** — `srv.Shutdown(shutdownCtx)` stops accepting new
+2. **gRPC** — `grpcSrv.GracefulStop()` lets active RPCs finish; falls
+   back to `grpcSrv.Stop()` after the configured timeout (5 s).
+3. **HTTP** — `srv.Shutdown(shutdownCtx)` stops accepting new
    connections, drains in-flight requests, returns when idle.
-3. **gRPC** — `srv.GracefulStop()` lets active RPCs finish; falls back
-   to `srv.Stop()` after the configured timeout (5 s).
-4. **NATS** — `Drain()` flushes pending publishes and pending acks
-   before closing the TCP connection. Pulled messages that haven't
-   been Acked yet redeliver via `MaxDeliver`.
-5. **Postgres pool** — `repo.Close()` (`pgxpool.Close`) closes idle
-   conns immediately and waits for active queries (or the deferred
-   timeout) before exiting.
-6. **TracerProvider** — `tp.Shutdown(ctx)` flushes batched spans to
-   Jaeger so the last few seconds of work appears in the UI.
+4. **NATS publisher** (deferred) — `Drain()` flushes pending
+   publishes and pending acks before closing the TCP connection.
+   Pulled messages that haven't been Acked yet redeliver via
+   `MaxDeliver`.
+5. **Postgres pool** (deferred) — `repo.Close()` (`pgxpool.Close`,
+   guarded by `sync.Once`) closes idle conns immediately and waits
+   for active queries (or the deferred timeout) before exiting.
+6. **TracerProvider** (deferred) — `tp.Shutdown(ctx)` flushes
+   batched spans to Jaeger so the last few seconds of work appears
+   in the UI.
+
+Defers run in reverse declaration order (LIFO), which is why the
+TracerProvider — declared first in `run()` so it's available to every
+subsequent layer — flushes last. That's intentional: spans from the
+DB pool close and NATS drain must be captured before the exporter
+shuts down.
 
 The `run() error` refactor (Day 6 Phase 1.4) was added precisely so
 **every** error path returns through these defers — `os.Exit(1)`
