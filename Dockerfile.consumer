@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+#
+# cmd/consumer — JetStream user.created consumer.
+#
+# Same multi-stage shape as Dockerfile.api: alpine builder → distroless
+# static runtime, fully static binary, nonroot UID. Different binary,
+# fewer assets (no embedded migrations or tokens config — the consumer
+# only reads, the api owns schema lifecycle).
+
+ARG GO_VERSION=1.22
+
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+ARG TARGETOS TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 \
+    GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/consumer ./cmd/consumer
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=builder /out/consumer /consumer
+USER nonroot:nonroot
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/consumer"]

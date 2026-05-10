@@ -17,24 +17,34 @@ MIGRATE_TAGS := postgres
 
 .PHONY: help install-tools sqlc-gen migrate-up migrate-down \
         compose-up compose-down compose-logs psql nats-cli \
+        stack-up stack-down stack-logs \
         api-run consumer-run \
-        test test-race build vet
+        test test-race test-integration cover cover-gate lint \
+        build vet
 
 help:
 	@echo "make install-tools   install sqlc + golang-migrate at pinned versions"
 	@echo "make sqlc-gen        regenerate internal/storage/postgres/pgdb/"
 	@echo "make migrate-up      apply all pending migrations against DATABASE_URL"
 	@echo "make migrate-down    revert one migration"
-	@echo "make compose-up      docker compose up -d  (db + nats + jaeger)"
-	@echo "make compose-down    docker compose down (volumes persist)"
-	@echo "make compose-logs    tail compose logs (all services)"
-	@echo "make psql            open a psql shell against DATABASE_URL"
-	@echo "make nats-cli        open a NATS CLI shell on the golearn-net"
-	@echo "make api-run         run cmd/api with -storage=postgres -migrate"
-	@echo "make consumer-run    run cmd/consumer against NATS_URL + DATABASE_URL"
-	@echo "make test            go test ./..."
-	@echo "make test-race       go test -race ./..."
-	@echo "make build / vet     go build / vet against ./..."
+	@echo "make compose-up         docker compose up -d  (db + nats + jaeger only)"
+	@echo "make compose-down       docker compose down (volumes persist)"
+	@echo "make compose-logs       tail compose logs (deps stack)"
+	@echo "make stack-up           docker compose -f compose.full.yaml up --build"
+	@echo "                        (db + nats + jaeger + api + consumer + migrate-once)"
+	@echo "make stack-down         docker compose -f compose.full.yaml down"
+	@echo "make stack-logs         tail logs from the full stack"
+	@echo "make psql               open a psql shell against DATABASE_URL"
+	@echo "make nats-cli           open a NATS CLI shell on the golearn-net"
+	@echo "make api-run            run cmd/api with -storage=postgres -migrate"
+	@echo "make consumer-run       run cmd/consumer against NATS_URL + DATABASE_URL"
+	@echo "make test               go test ./..."
+	@echo "make test-race          go test -race ./..."
+	@echo "make test-integration   go test -tags=integration ./internal/integration/..."
+	@echo "make cover              compute filtered coverage profile"
+	@echo "make cover-gate         enforce >= 70% coverage (fails CI on regression)"
+	@echo "make lint               golangci-lint run"
+	@echo "make build / vet        go build / vet against ./..."
 
 install-tools:
 	go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
@@ -75,11 +85,42 @@ api-run:
 consumer-run:
 	go run ./cmd/consumer -nats-url='$(NATS_URL)' -db-dsn='$(DATABASE_URL)'
 
+# Day-7 capstone: full containerised stack on one command. Builds the
+# api + consumer images locally, runs migrate-once, then keeps api and
+# consumer up alongside db + nats + jaeger.
+stack-up:
+	docker compose -f compose.full.yaml up --build -d
+
+stack-down:
+	docker compose -f compose.full.yaml down
+
+stack-logs:
+	docker compose -f compose.full.yaml logs -f
+
 test:
 	go test ./...
 
 test-race:
 	go test -race ./...
+
+# Integration tests need Docker (testcontainers Postgres + embedded
+# NATS). The build tag `integration` keeps them out of the unit run.
+test-integration:
+	go test -tags=integration -race -timeout=5m ./internal/integration/...
+
+# Coverage profile that excludes generated code (proto/gen, sqlc pgdb)
+# from the gate denominator. -coverpkg ensures internal helpers are
+# counted even if a test file lives in another package.
+cover:
+	go test -race -short -coverprofile=cover.out \
+	    -coverpkg='./internal/...,./pkg/...,./cmd/api/...' \
+	    ./...
+
+cover-gate: cover
+	./scripts/cover-gate.sh 70
+
+lint:
+	golangci-lint run
 
 build:
 	go build ./...

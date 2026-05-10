@@ -1,0 +1,42 @@
+# golangci-lint config — sane defaults for the goLearn module.
+#
+# Pinned in CI to v1.62.0; bumping the linter independently of this
+# file can break builds on rule changes.
+
+run:
+  timeout: 5m
+  go: '1.22'
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+    - misspell
+    - gofmt
+    - gosec
+
+linters-settings:
+  gosec:
+    excludes:
+      # G104 (errors unhandled): too noisy for `_ = msg.Ack()` etc.
+      - G104
+      # G115 (integer overflow conversion): triggers on `int32(limit)`
+      # in pagination helpers where the bound is already validated.
+      - G115
+
+issues:
+  exclude-dirs:
+    - proto/gen
+    - internal/storage/postgres/pgdb
+    - internal/transport/httpapi/gen
+  exclude-rules:
+    # Test helpers can panic / ignore errors freely.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
