@@ -6,7 +6,10 @@ type ctxKey struct{ name string }
 
 var workerIDKey = ctxKey{"workerID"}
 
-func withWorkerID(ctx context.Context, id int) context.Context {
+// WithWorkerID returns a child ctx tagged with the given worker id.
+// Pool uses this internally to label per-worker work; exported so
+// test code can simulate worker context without spinning up a Pool.
+func WithWorkerID(ctx context.Context, id int) context.Context {
 	return context.WithValue(ctx, workerIDKey, id)
 }
 

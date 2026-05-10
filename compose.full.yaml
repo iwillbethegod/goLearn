@@ -1,0 +1,136 @@
+# Day-7 capstone stack: every service the goLearn product needs in
+# one compose file.
+#
+#   docker compose -f compose.full.yaml up --build
+#
+# Services
+#   db        Postgres 16
+#   nats      NATS 2.10 with JetStream (file storage)
+#   jaeger    OTLP receiver + UI on :16686
+#   migrate   one-shot: applies db/migrations/*.up.sql then exits
+#   api       cmd/api — REST :8080 + gRPC :9090, publishes user.created
+#   consumer  cmd/consumer — JetStream durable, INSERTs notifications
+#
+# `compose.yaml` is the deps-only stack used by `make api-run` /
+# `make consumer-run` for the host-binary dev loop. THIS file is the
+# "single command startup" capstone deliverable.
+
+networks:
+  golearn-net:
+    name: golearn-net
+
+volumes:
+  pgdata:
+  jsdata:
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [golearn-net]
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB:       ${POSTGRES_DB:-app}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout:  3s
+      retries:  10
+
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    networks: [golearn-net]
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - jsdata:/data
+    healthcheck:
+      test:     ["CMD", "wget", "-qO-", "http://localhost:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout:  3s
+      retries:  10
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    restart: unless-stopped
+    networks: [golearn-net]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"  # UI
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"    # OTLP gRPC
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"    # OTLP HTTP
+
+  # One-shot migration job. depends_on: db: service_healthy gates the
+  # api and consumer on its completion via service_completed_successfully.
+  # restart: "no" prevents the migrator from looping on success.
+  migrate:
+    image: migrate/migrate:v4.19.1
+    networks: [golearn-net]
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command: >-
+      -path=/migrations
+      -database=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}?sslmode=disable
+      up
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: golearn-api:local
+    restart: unless-stopped
+    networks: [golearn-net]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}?sslmode=disable
+      NATS_URL: nats://nats:4222
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: goLearn-api
+      OTEL_TRACES_EXPORTER: otlp
+    command:
+      - "-storage=postgres"
+      - "-addr=:8080"
+      - "-grpc-addr=:9090"
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    image: golearn-consumer:local
+    restart: unless-stopped
+    networks: [golearn-net]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}?sslmode=disable
+      NATS_URL: nats://nats:4222
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: goLearn-consumer
+      OTEL_TRACES_EXPORTER: otlp
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+      jaeger:
+        condition: service_started

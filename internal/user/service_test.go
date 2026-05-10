@@ -3,6 +3,7 @@ package user_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync/atomic"
@@ -91,6 +92,184 @@ func TestRegisterNoPublisherDefault(t *testing.T) {
 	svc := newSvc(nil) // no publisher option → no-op default
 	if _, err := svc.Register(context.Background(), "Ada", "ada@example.com", "hunter22"); err != nil {
 		t.Fatalf("Register without publisher: %v", err)
+	}
+}
+
+func TestRegister_RejectsShortPassword(t *testing.T) {
+	svc := newSvc(nil)
+	_, err := svc.Register(context.Background(), "Ada", "ada@x.com", "abc")
+	if !errors.Is(err, model.ErrInvalidPassword) {
+		t.Fatalf("got %v, want ErrInvalidPassword", err)
+	}
+}
+
+func TestRegister_RejectsBadEmail(t *testing.T) {
+	svc := newSvc(nil)
+	_, err := svc.Register(context.Background(), "Ada", "not-an-email", "longenough")
+	if !errors.Is(err, model.ErrInvalidEmail) {
+		t.Fatalf("got %v, want ErrInvalidEmail", err)
+	}
+}
+
+func TestRegister_RejectsBlankNameOrEmail(t *testing.T) {
+	svc := newSvc(nil)
+	if _, err := svc.Register(context.Background(), "  ", "a@x.com", "longenough"); !errors.Is(err, model.ErrInvalidUser) {
+		t.Errorf("blank name = %v, want ErrInvalidUser", err)
+	}
+	if _, err := svc.Register(context.Background(), "Ada", "  ", "longenough"); !errors.Is(err, model.ErrInvalidUser) {
+		t.Errorf("blank email = %v, want ErrInvalidUser", err)
+	}
+}
+
+func TestAddUser_HappyPath(t *testing.T) {
+	svc := newSvc(nil)
+	got, err := svc.AddUser(context.Background(), "Ada", "ada@x.com")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	if got.ID == "" || got.Email != "ada@x.com" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestAddUser_BadEmail(t *testing.T) {
+	svc := newSvc(nil)
+	_, err := svc.AddUser(context.Background(), "Ada", "not-an-email")
+	if !errors.Is(err, model.ErrInvalidEmail) {
+		t.Fatalf("got %v, want ErrInvalidEmail", err)
+	}
+}
+
+func TestAddUser_BlankFields(t *testing.T) {
+	svc := newSvc(nil)
+	if _, err := svc.AddUser(context.Background(), "  ", "a@x.com"); !errors.Is(err, model.ErrInvalidUser) {
+		t.Errorf("blank name: %v", err)
+	}
+}
+
+func TestGetUser_HappyAndNotFound(t *testing.T) {
+	svc := newSvc(nil)
+	added, _ := svc.AddUser(context.Background(), "Ada", "ada@x.com")
+
+	got, err := svc.GetUser(context.Background(), added.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ID != added.ID {
+		t.Fatalf("got %+v", got)
+	}
+	if _, err := svc.GetUser(context.Background(), "missing"); !errors.Is(err, model.ErrUserNotFound) {
+		t.Fatalf("missing = %v, want ErrUserNotFound", err)
+	}
+	if _, err := svc.GetUser(context.Background(), "  "); !errors.Is(err, model.ErrInvalidUser) {
+		t.Fatalf("blank id = %v, want ErrInvalidUser", err)
+	}
+}
+
+func TestRemoveUser_HappyAndNotFound(t *testing.T) {
+	svc := newSvc(nil)
+	added, _ := svc.AddUser(context.Background(), "Ada", "ada@x.com")
+	if err := svc.RemoveUser(context.Background(), added.ID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if err := svc.RemoveUser(context.Background(), "missing"); !errors.Is(err, model.ErrUserNotFound) {
+		t.Fatalf("missing = %v, want ErrUserNotFound", err)
+	}
+	if err := svc.RemoveUser(context.Background(), "  "); !errors.Is(err, model.ErrInvalidUser) {
+		t.Fatalf("blank id = %v, want ErrInvalidUser", err)
+	}
+}
+
+func TestUpdateUser_HappyAndValidation(t *testing.T) {
+	svc := newSvc(nil)
+	added, _ := svc.AddUser(context.Background(), "Ada", "ada@x.com")
+
+	updated, err := svc.UpdateUser(context.Background(), added.ID, "Ada Lovelace", "")
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Name != "Ada Lovelace" {
+		t.Fatalf("name = %q", updated.Name)
+	}
+	// Bad email surfaces as ErrInvalidEmail
+	if _, err := svc.UpdateUser(context.Background(), added.ID, "", "not-an-email"); !errors.Is(err, model.ErrInvalidEmail) {
+		t.Fatalf("bad email = %v, want ErrInvalidEmail", err)
+	}
+	// Missing user
+	if _, err := svc.UpdateUser(context.Background(), "missing", "X", ""); !errors.Is(err, model.ErrUserNotFound) {
+		t.Fatalf("missing = %v, want ErrUserNotFound", err)
+	}
+}
+
+func TestListUsers(t *testing.T) {
+	svc := newSvc(nil)
+	for i := 0; i < 3; i++ {
+		_, _ = svc.Register(context.Background(), fmt.Sprintf("u%d", i), fmt.Sprintf("u%d@x.com", i), "longenough")
+	}
+	users, total, err := svc.ListUsers(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if total != 3 || len(users) != 3 {
+		t.Fatalf("total=%d len=%d", total, len(users))
+	}
+}
+
+func TestLogger_NotNil(t *testing.T) {
+	svc := newSvc(nil)
+	if svc.Logger() == nil {
+		t.Fatal("Logger() returned nil")
+	}
+}
+
+func TestLogin_HappyPath(t *testing.T) {
+	svc := newSvc(nil)
+	if _, err := svc.Register(context.Background(), "Ada", "ada@x.com", "hunter22"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Login(context.Background(), "ada@x.com", "hunter22")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if got.Email != "ada@x.com" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestLogin_WrongPassword(t *testing.T) {
+	svc := newSvc(nil)
+	_, _ = svc.Register(context.Background(), "Ada", "ada@x.com", "hunter22")
+	_, err := svc.Login(context.Background(), "ada@x.com", "wrong-password")
+	if !errors.Is(err, model.ErrInvalidCredential) {
+		t.Fatalf("got %v, want ErrInvalidCredential", err)
+	}
+}
+
+func TestLogin_NoSuchUser_ReturnsSameSentinel(t *testing.T) {
+	svc := newSvc(nil)
+	_, err := svc.Login(context.Background(), "ghost@x.com", "any")
+	if !errors.Is(err, model.ErrInvalidCredential) {
+		t.Fatalf("got %v, want ErrInvalidCredential (no leak which factor was wrong)", err)
+	}
+}
+
+func TestDeleteByEmail_HappyPath(t *testing.T) {
+	svc := newSvc(nil)
+	u, _ := svc.Register(context.Background(), "Ada", "ada@x.com", "hunter22")
+	if err := svc.DeleteByEmail(context.Background(), "ada@x.com", "hunter22"); err != nil {
+		t.Fatalf("DeleteByEmail: %v", err)
+	}
+	if _, err := svc.GetUser(context.Background(), u.ID); !errors.Is(err, model.ErrUserNotFound) {
+		t.Fatalf("user still present after delete: %v", err)
+	}
+}
+
+func TestDeleteByEmail_WrongPasswordMasksResult(t *testing.T) {
+	svc := newSvc(nil)
+	_, _ = svc.Register(context.Background(), "Ada", "ada@x.com", "hunter22")
+	err := svc.DeleteByEmail(context.Background(), "ada@x.com", "wrong-password")
+	if !errors.Is(err, model.ErrInvalidCredential) {
+		t.Fatalf("got %v, want ErrInvalidCredential", err)
 	}
 }
 

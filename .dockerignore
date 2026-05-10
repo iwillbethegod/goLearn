@@ -1,0 +1,39 @@
+# Drop everything that bloats the build context without being needed
+# inside the builder stage.
+
+# Git + IDE state
+.git
+.gitignore
+.github
+.idea
+.vscode
+.claude
+
+# Local-only artifacts
+.env
+.env.*
+!.env.example
+.data
+*.log
+*.swp
+*.bak
+
+# Test + coverage output
+cover.out
+cover.*.out
+coverage.html
+testdata/.cache
+
+# Docker artifacts
+Dockerfile.*
+docker-compose*.yaml
+docker-compose*.yml
+compose.yaml
+compose.*.yaml
+.dockerignore
+
+# Local documentation that doesn't need to ship in the image
+docs
+README.md
+*.md
+LICENSE

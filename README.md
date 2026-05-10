@@ -1,12 +1,24 @@
-# goLearn — 5-day Go bootcamp project
+# goLearn — 7-day Go capstone project
 
-A user-management service that grew across five days from a Day-1 CLI
-into a Day-4 service mesh, and on Day 5 swapped its in-memory store
-for **PostgreSQL** behind the same `user.Repository` interface. A
-user registered through one entrypoint becomes the auth subject for
-every other workflow: REST CRUD, concurrent CSV ingestion, and a
-gRPC token-bucket coordinator — all backed by a transactional
-Postgres-persisted store.
+A production-shaped user-management service built incrementally over
+7 days. The capstone (Day 7) is a single command that boots Postgres,
+NATS JetStream, Jaeger, the REST+gRPC api, and a separate event
+consumer, all containerised with a tested CI/CD pipeline:
+
+```bash
+make stack-up        # full stack — db + nats + jaeger + api + consumer + migrate
+make stack-down
+```
+
+A user registered through one entrypoint becomes the auth subject for
+every other workflow — REST CRUD, gRPC, concurrent CSV ingestion — and
+each user creation now fans out a `user.created` event over JetStream
+that a separate consumer turns into a `notifications` row, with one
+`trace_id` covering the whole flow in Jaeger.
+
+> **Architecture diagram + layered view**: [docs/architecture.md](docs/architecture.md).
+> **5–10 minute demo walkthrough**: [docs/demo.md](docs/demo.md).
+> **Operations runbook (start, shutdown, troubleshoot)**: [docs/operations.md](docs/operations.md).
 
 ## Cohesive flow
 
@@ -51,23 +63,39 @@ cmd/
                  + Day-2 concurrent worker pool
                  + Day-4 gRPC token client (-grpc-addr)
   api/           Day-3 REST :8080 + Day-4 gRPC :9090
+                 + Day-6 NATS publisher + OTel
   grpc-demo/     Day-4 standalone gRPC client
   gen/           CSV fixture generator (Day-2 demos)
+  consumer/      Day-6 JetStream user.created → notifications
 internal/
   model/         data structs (User, AppError, Record, FileStats)
-  user/          Service + Repository contract + DedupStore
-  storage/       jsonfile (default) + memory (tests)
+  user/          Service + Repository + Publisher contracts
+  storage/       jsonfile + memory + postgres (Day-5)
   app/           strategy-pattern factory
   processor/     Processor strategy + CSVProcessor
   pool/          dynamically-resizable worker pool
   handler/       middleware chain (CancelCheck, Dedup, Process, …)
   ingest/        per-file driver + FileGate
   repl/          stdin command interface (add/remove/cancel/…)
-  tokens/        token bucket + per-user store
+  tokens/        token bucket + per-user store (Day-4)
+  events/nats/   Day-6 JetStream publisher + W3C carrier
+  observability/ Day-6 OTel TracerProvider bootstrap
+  integration/   Day-7 end-to-end test (build tag `integration`)
   transport/
     httpapi/     Day-3 REST handler + generated router
     grpc/        Day-4 UserServiceServer impl
-pkg/metrics/     atomic UsersAdded counter
+pkg/
+  metrics/       atomic UsersAdded counter
+  logger/        Day-6 slog.Handler decorator (trace_id correlation)
+.github/workflows/
+  ci.yml         Day-7 vet + test + cover-gate + integration + lint
+  release.yml    Day-7 GHCR multi-stage image push (api + consumer)
+Dockerfile.api      Day-7 multi-stage distroless build
+Dockerfile.consumer Day-7 multi-stage distroless build
+compose.yaml        Day-6 deps stack (db + nats + jaeger)
+compose.full.yaml   Day-7 capstone stack (deps + api + consumer + migrate)
+scripts/cover-gate.sh  Day-7 70% coverage gate (filters generated code)
+.golangci.yml          Day-7 lint config
 ```
 
 Module path: `github.com/ashishsinghbhadoria/goLearn`. Go 1.22.
@@ -577,6 +605,69 @@ For deeper notes:
 - [docs/observability.md](docs/observability.md) — OTel bootstrap,
   exporter modes, slog correlation, init-order rules, the
   `InfoContext` footgun, demo trace.
+
+---
+
+## Day 7 — Testing + Dockerization + Capstone
+
+Day 7 is the production-hardening pass: a real test suite, container
+images for every Go service, a single-command stack, and a CI/CD
+pipeline that gates every PR and ships images on merge.
+
+```bash
+# One command boots the entire product
+make stack-up         # db + nats + jaeger + api + consumer + migrate
+make stack-down       # graceful SIGTERM to every container
+
+# Test gates (mirror what CI runs)
+make test-race        # unit suite, race detector
+make test-integration # E2E with testcontainers Postgres + embedded JetStream
+make cover-gate       # filtered total coverage; fails < 70%
+make lint             # golangci-lint
+```
+
+What landed:
+
+- **Test coverage push**: 9.7% → 61.3% under `-short`; 70%+ in CI when
+  the testcontainer postgres suite + the integration E2E run.
+  20 new test files across every layer (Service, repos, transport,
+  middleware, OTel bootstrap, slog handler, metrics, NATS, processor,
+  pool, handler chain, factory, model).
+- **End-to-end integration test**: `internal/integration/e2e_test.go`
+  boots real Postgres + embedded JetStream, replicates the cmd/api
+  and cmd/consumer wiring, asserts the full cross-service flow,
+  redelivery idempotency, and trace-context linkage between producer
+  and consumer spans.
+- **Multi-stage Dockerfiles**: `Dockerfile.api` and
+  `Dockerfile.consumer` build static binaries (CGO off) and ship on
+  `gcr.io/distroless/static:nonroot`. ~20 MB images, no shell, no
+  package manager, runs as nonroot, `STOPSIGNAL SIGTERM` for graceful
+  drain. `.dockerignore` keeps the build context minimal.
+- **`compose.full.yaml`**: every service on a named network
+  `golearn-net`. The `migrate` service runs once with
+  `restart: "no"` and gates `api` + `consumer` via
+  `service_completed_successfully`. JetStream-aware healthcheck
+  (`/healthz?js-enabled-only=true`) prevents consumers from racing
+  the broker.
+- **Graceful shutdown**: every binary uses the `run() error` pattern
+  introduced in Day 6 so deferred `srv.Shutdown` →
+  `grpcSrv.GracefulStop` → `nc.Drain` → `pool.Close` →
+  `tp.Shutdown` all fire on every exit path. See
+  [docs/operations.md](docs/operations.md) for the full sequence.
+- **CI pipeline** (`.github/workflows/ci.yml`): every PR runs
+  `go vet → go test -race -short → go test -tags=integration → cover-gate
+  (70%) → golangci-lint`.
+- **Image release pipeline** (`.github/workflows/release.yml`): every
+  merge to `main` builds and pushes
+  `ghcr.io/iwillbethegod/golearn-{api,consumer}:{latest,<sha>}` via
+  buildx + GHA cache.
+- **Capstone docs**:
+  - [docs/architecture.md](docs/architecture.md) — layered diagram,
+    request → trace lifecycle, strategy seams, deployment topology.
+  - [docs/demo.md](docs/demo.md) — 5–10 minute timed walkthrough
+    script with terminal cheat sheet.
+  - [docs/operations.md](docs/operations.md) — runbook for start /
+    stop / inspect / troubleshoot.
 
 ---
 

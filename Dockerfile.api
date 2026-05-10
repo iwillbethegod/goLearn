@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+#
+# cmd/api — multi-stage build. The final image is gcr.io/distroless/static
+# (no shell, no package manager, ~2 MB base + the static Go binary).
+# CGO is disabled so the binary is fully static and the runtime image
+# can be `static:nonroot`.
+#
+# Build with buildx for multi-arch:
+#   docker buildx build -f Dockerfile.api --platform linux/amd64,linux/arm64 \
+#     -t ghcr.io/iwillbethegod/golearn-api:dev .
+
+ARG GO_VERSION=1.22
+
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
+WORKDIR /src
+
+# Cache module graph as its own layer so source-only changes don't
+# re-download deps.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+# TARGETOS / TARGETARCH come from buildx; default to host on plain
+# `docker build`. -trimpath strips $GOPATH from binary, -ldflags '-s -w'
+# drops the symbol table + DWARF for a ~30% smaller binary.
+ARG TARGETOS TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 \
+    GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+
+# Runtime: distroless static + nonroot user. No shell, no package
+# manager — minimal attack surface.
+FROM gcr.io/distroless/static:nonroot
+
+# Migrations and tokens config travel with the binary so the api can
+# `-migrate` on startup or reach `config/tokens.yaml` at the default
+# flag path.
+COPY --from=builder /out/api /api
+COPY --from=builder /src/db/migrations /db/migrations
+COPY --from=builder /src/config /config
+
+USER nonroot:nonroot
+EXPOSE 8080 9090
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/api"]
