@@ -5,10 +5,15 @@
 // `tools` build tag means none of these imports end up in any
 // production binary.
 //
-// Note: protoc itself is NOT a Go tool — install it via the OS
-// package manager (`brew install protobuf` on macOS,
-// `apt-get install -y protobuf-compiler` on Debian/Ubuntu). Only
-// the protoc *plugins* are pinned here.
+// Notes:
+//   - protoc itself is NOT a Go tool — install via the OS package
+//     manager (`brew install protobuf` on macOS,
+//     `apt-get install -y protobuf-compiler` on Debian/Ubuntu). Only
+//     the protoc *plugins* are pinned here.
+//   - sqlc and golang-migrate are `package main` and cannot be
+//     imported via the tools-pattern. They are installed via the
+//     `install-tools` target in the Makefile and pinned by version
+//     there; CI uses the same target.
 package tools
 
 import (

@@ -2,6 +2,7 @@ data/
 data_*/
 .data/
 .claude/
+.env
 bin/
 server
 __debug_bin*

@@ -35,12 +35,19 @@ func main() {
 	repo, err := app.NewRepository(app.RepositoryConfig{
 		Type:     app.RepositoryType(cfg.storage),
 		JSONPath: cfg.storePath,
+		DSN:      cfg.dbDSN,
+		Ctx:      context.Background(),
 		Logger:   logger,
 	})
 	if err != nil {
 		logger.Error("init repository failed", "err", err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := repo.Close(); err != nil {
+			logger.Error("repository close failed", "err", err)
+		}
+	}()
 	svc := user.NewService(repo, logger, metrics.New())
 
 	switch {
@@ -59,12 +66,12 @@ func main() {
 // table. This is the Day-1 "List users" deliverable surface — no
 // auth, no gRPC, just the repository read-through.
 func runList(svc *user.Service) {
-	users, err := svc.ListUsers(context.Background())
+	users, total, err := svc.ListUsers(context.Background(), 0, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list failed: %v\n", err)
 		os.Exit(1)
 	}
-	if len(users) == 0 {
+	if total == 0 {
 		fmt.Println("(no users registered)")
 		return
 	}
@@ -233,6 +240,7 @@ type config struct {
 	name          string
 	storePath     string
 	storage       string
+	dbDSN         string
 
 	grpcAddr string
 
@@ -257,7 +265,8 @@ func parseFlags() config {
 	password := flag.String("password", "", "user password (or set $INGEST_PASSWORD)")
 	name := flag.String("name", "", "user name (register only)")
 	storePath := flag.String("store-path", ".data/users.json", "path to the persistent user store (jsonfile)")
-	storage := flag.String("storage", "jsonfile", "storage strategy: memory or jsonfile")
+	storage := flag.String("storage", "jsonfile", "storage strategy: memory | jsonfile | postgres")
+	dbDSN := flag.String("db-dsn", os.Getenv("DATABASE_URL"), "Postgres DSN; defaults to $DATABASE_URL (postgres only)")
 	grpcAddr := flag.String("grpc-addr", "", "gRPC user-service address (e.g. :9090). Empty disables the token gate.")
 
 	flag.Parse()
@@ -294,6 +303,7 @@ func parseFlags() config {
 		name:          *name,
 		storePath:     *storePath,
 		storage:       *storage,
+		dbDSN:         *dbDSN,
 		grpcAddr:      *grpcAddr,
 		paths:         flag.Args(),
 	}

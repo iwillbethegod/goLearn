@@ -35,20 +35,17 @@ const (
 )
 
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request, params gen.ListUsersParams) {
-	users, err := h.svc.ListUsers(r.Context())
+	limit, offset := paginationParams(params)
+	users, total, err := h.svc.ListUsers(r.Context(), limit, offset)
 	if err != nil {
 		writeError(w, r, h.logger, err)
 		return
 	}
-	total := len(users)
-	limit, offset := paginationParams(params)
-	page := pageSlice(users, limit, offset)
-
-	out := make([]gen.User, 0, len(page))
-	for _, u := range page {
+	out := make([]gen.User, 0, len(users))
+	for _, u := range users {
 		out = append(out, toAPIUser(u))
 	}
-	w.Header().Set("X-Total-Count", strconv.Itoa(total))
+	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -68,17 +65,6 @@ func paginationParams(params gen.ListUsersParams) (limit, offset int) {
 		offset = *params.Offset
 	}
 	return
-}
-
-func pageSlice(users []model.User, limit, offset int) []model.User {
-	if offset >= len(users) {
-		return nil
-	}
-	end := offset + limit
-	if end > len(users) {
-		end = len(users)
-	}
-	return users[offset:end]
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {

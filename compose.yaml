@@ -1,0 +1,28 @@
+# Local-dev Docker stack for Day-5. Brings up just Postgres; the
+# Go binaries (cmd/api, cmd/ingest, …) run on the host. Override
+# any value in .env (gitignored — see .env.example for the
+# template).
+#
+#   make compose-up      # start the db
+#   make migrate-up      # apply schema migrations
+#   make compose-down    # tear it down (data persists in volume)
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB:       ${POSTGRES_DB:-app}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout:  3s
+      retries:  10
+
+volumes:
+  pgdata:
