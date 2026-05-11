@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+// UserService is the day-4 gRPC contract between the user-service
+// (cmd/api) and the CSV processor (cmd/ingest). The processor calls
+// the token RPCs to reserve quota before processing each file and to
+// return any unconsumed tokens after a partial failure. The CRUD RPCs
+// mirror the REST API as a learning artifact and are used by the
+// standalone cmd/grpc-demo client.
+package user.v1;
+
+option go_package = "github.com/ashishsinghbhadoria/goLearn/proto/gen/userpb;userpb";
+
+service UserService {
+  // ---------- Token bucket ----------
+
+  // GetTokens reads the current bucket state for a user without
+  // consuming any tokens.
+  rpc GetTokens(GetTokensRequest) returns (GetTokensResponse);
+
+  // TakeTokens atomically reserves `count` tokens. If the bucket has
+  // insufficient tokens, granted is false and remaining is the
+  // current available count. The caller must not consume any tokens
+  // when granted is false.
+  rpc TakeTokens(TakeTokensRequest) returns (TakeTokensResponse);
+
+  // ReturnTokens credits previously-reserved tokens back into the
+  // bucket (e.g. when a CSV processing run failed partway and some
+  // rows never got processed). The result is capped at capacity.
+  rpc ReturnTokens(ReturnTokensRequest) returns (ReturnTokensResponse);
+
+  // ---------- CRUD (mirrors REST) ----------
+
+  // GetUser fetches a user record by ID. Returns NOT_FOUND if absent.
+  rpc GetUser(GetUserRequest) returns (User);
+
+  // ListUsers returns a window of users sorted by ID. The total field
+  // is the unpaginated count.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}
+
+message User {
+  string id    = 1;
+  string name  = 2;
+  string email = 3;
+  // password_hash is intentionally omitted from the wire format.
+}
+
+message GetTokensRequest {
+  string user_id = 1;
+}
+
+message GetTokensResponse {
+  int64 available = 1;
+  int64 capacity  = 2;
+}
+
+message TakeTokensRequest {
+  string user_id = 1;
+  int64  count   = 2;
+}
+
+message TakeTokensResponse {
+  bool  granted   = 1;
+  int64 remaining = 2;
+}
+
+message ReturnTokensRequest {
+  string user_id = 1;
+  int64  count   = 2;
+}
+
+message ReturnTokensResponse {
+  int64 remaining = 1;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message ListUsersRequest {
+  // limit defaults to 100, max 1000. offset >= 0.
+  int32 limit  = 1;
+  int32 offset = 2;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  int64        total  = 2;
+}

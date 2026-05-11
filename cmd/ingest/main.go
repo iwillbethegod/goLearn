@@ -10,7 +10,11 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/app"
 	"github.com/ashishsinghbhadoria/goLearn/internal/handler"
@@ -21,6 +25,7 @@ import (
 	"github.com/ashishsinghbhadoria/goLearn/internal/repl"
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 	"github.com/ashishsinghbhadoria/goLearn/pkg/metrics"
+	userpb "github.com/ashishsinghbhadoria/goLearn/proto/gen/userpb"
 )
 
 func main() {
@@ -41,11 +46,34 @@ func main() {
 	switch {
 	case cfg.register:
 		runRegister(svc, cfg)
+	case cfg.list:
+		runList(svc)
 	case cfg.deleteProfile:
 		runDeleteProfile(svc, cfg)
 	default:
 		runIngest(cfg, logger, svc)
 	}
+}
+
+// runList prints all users in the persistent store as a tab-aligned
+// table. This is the Day-1 "List users" deliverable surface — no
+// auth, no gRPC, just the repository read-through.
+func runList(svc *user.Service) {
+	users, err := svc.ListUsers(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "list failed: %v\n", err)
+		os.Exit(1)
+	}
+	if len(users) == 0 {
+		fmt.Println("(no users registered)")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tNAME\tEMAIL")
+	for _, u := range users {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", u.ID, u.Name, u.Email)
+	}
+	_ = w.Flush()
 }
 
 // runRegister handles `-register` and exits the process. Auth is not
@@ -141,6 +169,22 @@ func runIngest(cfg config, logger *slog.Logger, svc *user.Service) {
 
 	runner := ingest.NewRunner(proc, p, chain, stats, logger)
 
+	// Optional: gRPC token gate. If -grpc-addr is empty, ingest runs
+	// without rate limiting (legacy day-3 behavior).
+	if cfg.grpcAddr != "" {
+		conn, err := grpc.NewClient(cfg.grpcAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if err != nil {
+			logger.Error("grpc dial failed", "addr", cfg.grpcAddr, "err", err)
+			os.Exit(1)
+		}
+		defer conn.Close()
+		gate := newTokenGate(userpb.NewUserServiceClient(conn), authedUser.ID, logger)
+		runner.WithGate(gate)
+		logger.Info("token gate enabled", "addr", cfg.grpcAddr, "user_id", authedUser.ID)
+	}
+
 	scheduleAutoCancels(cfg.cancelList, cfg.cancelAfter, runner, logger)
 
 	if cfg.repl {
@@ -182,12 +226,15 @@ type config struct {
 	verbose     bool
 
 	register      bool
+	list          bool
 	deleteProfile bool
 	email         string
 	password      string
 	name          string
 	storePath     string
 	storage       string
+
+	grpcAddr string
 
 	paths []string
 }
@@ -204,12 +251,14 @@ func parseFlags() config {
 	verbose := flag.Bool("verbose", false, "log every record (high overhead at >100k rec/s)")
 
 	register := flag.Bool("register", false, "register a new user (with -email -name -password) and exit")
+	list := flag.Bool("list", false, "print all users in the persistent store and exit (no auth)")
 	deleteProfile := flag.Bool("delete-profile", false, "authenticate (with -email -password) and delete the user, then exit")
 	email := flag.String("email", "", "user email (login or register)")
 	password := flag.String("password", "", "user password (or set $INGEST_PASSWORD)")
 	name := flag.String("name", "", "user name (register only)")
 	storePath := flag.String("store-path", ".data/users.json", "path to the persistent user store (jsonfile)")
 	storage := flag.String("storage", "jsonfile", "storage strategy: memory or jsonfile")
+	grpcAddr := flag.String("grpc-addr", "", "gRPC user-service address (e.g. :9090). Empty disables the token gate.")
 
 	flag.Parse()
 
@@ -238,12 +287,14 @@ func parseFlags() config {
 		workMax:       *workMax,
 		verbose:       *verbose,
 		register:      *register,
+		list:          *list,
 		deleteProfile: *deleteProfile,
 		email:         *email,
 		password:      pwd,
 		name:          *name,
 		storePath:     *storePath,
 		storage:       *storage,
+		grpcAddr:      *grpcAddr,
 		paths:         flag.Args(),
 	}
 }

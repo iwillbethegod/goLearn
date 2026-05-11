@@ -11,9 +11,9 @@ import (
 )
 
 // Repository is the persistence boundary. Implementations live under
-// internal/storage/{jsonfile,memory,postgres}. The interface is
-// defined here (the consumer side) so a new backend doesn't have to
-// import every package that uses User.
+// internal/storage/{jsonfile,memory}. The interface is defined here
+// (the consumer side) so a new backend doesn't have to import every
+// package that uses User.
 type Repository interface {
 	Add(ctx context.Context, u model.User) error
 	Get(ctx context.Context, id string) (model.User, error)

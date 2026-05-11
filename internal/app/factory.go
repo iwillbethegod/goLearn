@@ -1,3 +1,7 @@
+// Package app exposes a small factory that maps a runtime config
+// (RepositoryType + JSON path) to a concrete user.Repository
+// implementation. It is the strategy-pattern seam: callers depend
+// on the user.Repository interface, never on a concrete backend.
 package app
 
 import (
@@ -9,38 +13,32 @@ import (
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
 )
 
-// RepositoryType defines the storage strategy
+// RepositoryType selects a storage strategy.
 type RepositoryType string
 
 const (
 	TypeMemory   RepositoryType = "memory"
 	TypeJSONFile RepositoryType = "jsonfile"
-	TypePostgres RepositoryType = "postgres"
 )
 
-// RepositoryConfig holds repository creation parameters
+// RepositoryConfig holds repository creation parameters. Only
+// JSONPath is meaningful when Type == TypeJSONFile.
 type RepositoryConfig struct {
 	Type     RepositoryType
-	JSONPath string // for jsonfile strategy
+	JSONPath string
 	Logger   *slog.Logger
 }
 
-// NewRepository creates a repository based on the strategy specified in RepositoryConfig
+// NewRepository constructs the repository selected by cfg.Type.
 func NewRepository(cfg RepositoryConfig) (user.Repository, error) {
 	switch cfg.Type {
 	case TypeMemory:
 		return memory.NewUserRepo(cfg.Logger), nil
-
 	case TypeJSONFile:
 		if cfg.JSONPath == "" {
 			cfg.JSONPath = "users.json"
 		}
 		return jsonfile.NewUserRepo(cfg.JSONPath, cfg.Logger)
-
-	case TypePostgres:
-		// TODO: implement postgres
-		return nil, fmt.Errorf("postgres repository not yet implemented")
-
 	default:
 		return nil, fmt.Errorf("unknown repository type: %s", cfg.Type)
 	}

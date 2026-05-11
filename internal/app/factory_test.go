@@ -3,16 +3,17 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/ashishsinghbhadoria/goLearn/internal/model"
 	"github.com/ashishsinghbhadoria/goLearn/internal/user"
-	"github.com/ashishsinghbhadoria/goLearn/pkg/logger"
 	"github.com/ashishsinghbhadoria/goLearn/pkg/metrics"
 )
 
 func TestAddUser(t *testing.T) {
-	log := logger.NewLogger()
+	log := newTestLogger()
 	repo, err := NewRepository(RepositoryConfig{
 		Type:   TypeMemory,
 		Logger: log,
@@ -35,7 +36,7 @@ func TestAddUser(t *testing.T) {
 }
 
 func TestAddDuplicateUser(t *testing.T) {
-	log := logger.NewLogger()
+	log := newTestLogger()
 	repo, err := NewRepository(RepositoryConfig{
 		Type:   TypeMemory,
 		Logger: log,
@@ -57,7 +58,7 @@ func TestAddDuplicateUser(t *testing.T) {
 }
 
 func TestAddInvalidUser(t *testing.T) {
-	log := logger.NewLogger()
+	log := newTestLogger()
 	repo, err := NewRepository(RepositoryConfig{
 		Type:   TypeMemory,
 		Logger: log,
@@ -74,7 +75,7 @@ func TestAddInvalidUser(t *testing.T) {
 }
 
 func TestAddInvalidEmail(t *testing.T) {
-	log := logger.NewLogger()
+	log := newTestLogger()
 	repo, err := NewRepository(RepositoryConfig{
 		Type:   TypeMemory,
 		Logger: log,
@@ -107,7 +108,7 @@ func TestAddInvalidEmail(t *testing.T) {
 }
 
 func TestRemoveUser(t *testing.T) {
-	log := logger.NewLogger()
+	log := newTestLogger()
 	repo, err := NewRepository(RepositoryConfig{
 		Type:   TypeMemory,
 		Logger: log,
@@ -142,7 +143,7 @@ func TestRemoveUser(t *testing.T) {
 }
 
 func TestRemoveNonexistentUser(t *testing.T) {
-	log := logger.NewLogger()
+	log := newTestLogger()
 	repo, err := NewRepository(RepositoryConfig{
 		Type:   TypeMemory,
 		Logger: log,
@@ -163,7 +164,7 @@ func TestRemoveNonexistentUser(t *testing.T) {
 
 func newSvc(t *testing.T) *user.Service {
 	t.Helper()
-	log := logger.NewLogger()
+	log := newTestLogger()
 	repo, err := NewRepository(RepositoryConfig{Type: TypeMemory, Logger: log})
 	if err != nil {
 		t.Fatalf("repo: %v", err)
@@ -234,4 +235,8 @@ func TestUpdateMissingUser(t *testing.T) {
 	if !errors.Is(err, model.ErrUserNotFound) {
 		t.Fatalf("expected ErrUserNotFound, got %v", err)
 	}
+}
+
+func newTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

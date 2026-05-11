@@ -4,6 +4,8 @@ data_*/
 .claude/
 bin/
 server
+__debug_bin*
 *.test
 *.out
 .DS_Store
+.idea/
